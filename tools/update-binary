@@ -1,0 +1,126 @@
+#!/sbin/sh
+#
+# PitchBlack Recovery installer for the itel RS4 (S666LN, MT6789).
+#
+# WHAT THIS DOES
+# Swaps ONLY the recovery ramdisk fragment inside the vendor_boot partition,
+# ON THE DEVICE, using the vendor_boot that is actually there right now.
+#
+# WHY NOT JUST WRITE A PREBUILT IMAGE
+# vendor_boot holds two ramdisk fragments. The PLATFORM one carries the kernel
+# modules, the four touch firmware blobs and the patched adaptive-ts.ko, and
+# BOTH fragments are loaded in recovery -- so a recovery built from the PBRP
+# tree and flashed whole gives a touch UI with NO TOUCH INPUT (PBRP's own
+# platform fragment is four bytes). The previous installer solved that by
+# baking in a donor image chosen on the build host, which works but pins the
+# platform fragment to whatever the donor had on the day it was made. Reading
+# it off the device instead is always current, and survives ROM updates.
+#
+# WRITES BOTH SLOTS. That is a brick-avoidance requirement here, not caution:
+# early OrangeFox wrote one slot, which survived stock/port ROMs (they install
+# to the ACTIVE slot) and bricked phones on AOSP-style ROMs, which write the
+# INACTIVE slot and then switch to it.
+#
+OUTFD=$2
+ZIP=$3
+
+ui_print() { echo -e "ui_print $1\nui_print" >> /proc/self/fd/$OUTFD; }
+abort()    { ui_print " "; ui_print "  !! $1"; ui_print " "; cleanup; exit 1; }
+cleanup()  { cd /; rm -rf "$WORK" 2>/dev/null; }
+
+WORK=/tmp/pbrp-install
+BYNAME=/dev/block/by-name
+FRAG=vendor_ramdisk_recovery.cpio
+
+ui_print " "
+ui_print "=================================================="
+ui_print "  PitchBlack Recovery  -  itel RS4 (S666LN)"
+ui_print "=================================================="
+ui_print " "
+
+# ---- tools and partitions
+MB=/system/bin/magiskboot
+[ -x "$MB" ] || MB=/sbin/magiskboot
+[ -x "$MB" ] || MB=$(which magiskboot 2>/dev/null)
+[ -n "$MB" ] && [ -x "$MB" ] || abort "magiskboot not found; cannot repack vendor_boot"
+
+[ -e "$BYNAME/vendor_boot_a" ] || abort "no $BYNAME/vendor_boot_a on this device"
+[ -e "$BYNAME/vendor_boot_b" ] || abort "no $BYNAME/vendor_boot_b on this device"
+
+rm -rf "$WORK"; mkdir -p "$WORK" || abort "cannot create $WORK"
+cd "$WORK" || abort "cannot enter $WORK"
+
+# ---- our new recovery fragment
+unzip -o "$ZIP" "$FRAG" -d "$WORK" >/dev/null 2>&1
+[ -s "$WORK/$FRAG" ] || abort "$FRAG missing from the zip"
+NEWSZ=$(stat -c%s "$WORK/$FRAG" 2>/dev/null || wc -c < "$WORK/$FRAG")
+mv -f "$WORK/$FRAG" "$WORK/new_recovery.cpio"
+ui_print "  new recovery ramdisk : $NEWSZ bytes"
+
+# ---- read the vendor_boot that is on the device NOW
+SLOT=$(getprop ro.boot.slot_suffix 2>/dev/null)
+[ -n "$SLOT" ] || SLOT=_a
+ui_print "  active slot          : $SLOT"
+dd bs=1048576 if=$BYNAME/vendor_boot$SLOT of=vendor_boot.img 2>/dev/null || \
+    abort "cannot read vendor_boot$SLOT"
+
+"$MB" unpack -n vendor_boot.img >/dev/null 2>&1
+# v4 header: fragments unpack as vendor_ramdisk_<name>.cpio, the platform one
+# being vendor_ramdisk_.cpio (its name is the empty string). magiskboot 28+
+# instead writes vendor_ramdisk/<name>.cpio.
+[ -s "$FRAG" ] || { [ -s vendor_ramdisk/recovery.cpio ] && FRAG=vendor_ramdisk/recovery.cpio; }
+[ -s "$FRAG" ] || abort "vendor_boot$SLOT has no recovery ramdisk fragment to replace"
+[ -s vendor_ramdisk_.cpio ] || [ -s vendor_ramdisk/.cpio ] || \
+    ui_print "  ! warning: no platform fragment found"
+PLATSZ=$(stat -c%s vendor_ramdisk_.cpio 2>/dev/null || echo 0)
+ui_print "  platform ramdisk kept: $PLATSZ bytes"
+
+# ---- swap in ours and repack
+cp -f new_recovery.cpio "$FRAG" || abort "cannot stage the new ramdisk"
+"$MB" repack vendor_boot.img new_vendor_boot.img >/dev/null 2>&1
+[ -s new_vendor_boot.img ] || abort "magiskboot repack failed"
+
+SZ=$(stat -c%s new_vendor_boot.img 2>/dev/null || wc -c < new_vendor_boot.img)
+[ "$SZ" -le 67108864 ] || abort "repacked image is $SZ bytes, larger than the 64 MiB partition"
+ui_print "  repacked image       : $SZ bytes"
+
+# ---- CONTROL: verify before writing to flash.
+# Re-unpack what we are about to flash and require the recovery fragment to be
+# byte-identical to ours and the platform fragment to be unchanged. A partition
+# write is not the place to find out the repack went wrong.
+rm -rf verify && mkdir verify && cp new_vendor_boot.img verify/ && cd verify
+"$MB" unpack -n new_vendor_boot.img >/dev/null 2>&1
+V_REC=$(sha256sum vendor_ramdisk_recovery.cpio 2>/dev/null | cut -d' ' -f1)
+[ -z "$V_REC" ] && V_REC=$(sha256sum vendor_ramdisk/recovery.cpio 2>/dev/null | cut -d' ' -f1)
+N_REC=$(sha256sum ../new_recovery.cpio 2>/dev/null | cut -d' ' -f1)
+V_PLAT=$(sha256sum vendor_ramdisk_.cpio 2>/dev/null | cut -d' ' -f1)
+O_PLAT=$(sha256sum ../vendor_ramdisk_.cpio 2>/dev/null | cut -d' ' -f1)
+cd "$WORK"
+[ -n "$V_REC" ] && [ "$V_REC" = "$N_REC" ] || abort "control FAILED: recovery fragment did not survive the repack"
+if [ -n "$O_PLAT" ]; then
+  [ "$V_PLAT" = "$O_PLAT" ] || abort "control FAILED: the platform fragment changed (touch firmware would be lost)"
+fi
+ui_print "  control              : OK (recovery swapped, platform intact)"
+ui_print " "
+
+# ---- write both slots
+for s in a b; do
+  ui_print "  writing vendor_boot_$s ..."
+  blockdev --setrw $BYNAME/vendor_boot_$s 2>/dev/null
+  dd if=new_vendor_boot.img of=$BYNAME/vendor_boot_$s bs=1M 2>/dev/null || \
+    abort "write to vendor_boot_$s failed"
+done
+sync
+
+"$MB" cleanup >/dev/null 2>&1
+cleanup
+
+ui_print " "
+ui_print "  BOTH SLOTS WRITTEN."
+ui_print " "
+ui_print "  Reboot to recovery to start PitchBlack."
+ui_print " "
+ui_print "  Note: a ROM OTA replaces vendor_boot and removes"
+ui_print "  PitchBlack. Reflash this zip afterwards."
+ui_print " "
+exit 0

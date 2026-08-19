@@ -1,0 +1,37 @@
+--- a/system/vold/KeyUtil.cpp
++++ b/system/vold/KeyUtil.cpp
+@@ -149,8 +149,32 @@
+ static bool fscryptKeyring(key_serial_t* device_keyring) {
+     *device_keyring = keyctl_search(KEY_SPEC_SESSION_KEYRING, "keyring", "fscrypt", 0);
+     if (*device_keyring == -1) {
+-        PLOG(ERROR) << "Unable to find device keyring";
+-        return false;
++        // [itel RS4 / PBRP] CREATE IT INSTEAD OF FAILING.
++        //
++        // Nothing in this tree ever creates the "fscrypt" session keyring:
++        // `add_key("keyring", ...)` appears nowhere in system/vold or
++        // bootable/recovery. AOSP's vold creates it during startup; recovery
++        // has no vold process, so the keyring never exists and this search
++        // always fails with ENOKEY.
++        //
++        // That is fatal even on the MODERN v2 path, because installKey() calls
++        // installProvisioningKey() (KeyUtil.cpp:317) unconditionally after the
++        // FS_IOC_ADD_ENCRYPTION_KEY ioctl has already succeeded. Observed on
++        // the device as:
++        //     E recovery: Unable to find device keyring: Required key not available
++        //     fscrypt_initialize_systemwide_keys returned fail
++        // after which FsCrypt.cpp:466 flips use_hw_wrapped_key and retries,
++        // and THAT attempt dies in the TEE with
++        //     TlcKM: TEE_ExportKey ... returnCode == -33  (INVALID_KEY_BLOB)
++        // which is a red herring: the wrapped-key path was never the right one
++        // for this device (its fstab carries no `wrappedkey` flag), it is just
++        // the fallback the real failure triggers.
++        *device_keyring = add_key("keyring", "fscrypt", nullptr, 0, KEY_SPEC_SESSION_KEYRING);
++        if (*device_keyring == -1) {
++            PLOG(ERROR) << "Unable to find or create device keyring";
++            return false;
++        }
++        LOG(INFO) << "Created fscrypt session keyring " << *device_keyring;
+     }
+     return true;
+ }

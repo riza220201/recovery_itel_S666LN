@@ -1,0 +1,14 @@
+# Build output and scratch. Everything tracked here is either authored or
+# extracted from this device's own stock firmware; nothing is generated.
+*.o
+*.pyc
+__pycache__/
+*.swp
+*~
+.DS_Store
+
+# Packaged artefacts belong in a release, not in the tree.
+/out/
+PitchBlack-*.zip
+PitchBlack-*.img
+recovery.cpio*

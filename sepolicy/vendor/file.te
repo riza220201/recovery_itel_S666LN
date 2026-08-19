@@ -1,0 +1,61 @@
+# /sys/pnpmgr/* is generic "sysfs", so pnpmgr could not read or write its own
+# tuning nodes (boost_enable, boost_mode, fre_db_cmd, margin_mode, loading_th,
+# fstb_soft_level, fstb_fps_list) once it had a domain of its own.
+type sysfs_pnpmgr, fs_type, sysfs_type;
+
+# /data/vendor/goodix/gf_data — the Goodix fingerprint HAL's own store, and
+# /data/vendor/camera_watermark — the camera HAL's. itel gives each its own type
+# (vendor_gf_data_file, vendor_watermark_data_file); device/mediatek/
+# sepolicy_vndr has neither, so both directories resolve to generic
+# vendor_data_file, which their owning domain may enumerate but not write.
+# Measured on build 61, one denial each at HAL start:
+#   denied { write } name="gf_data"           scontext=hal_fingerprint_default
+#   denied { write } name="camera_watermark"  scontext=mtk_hal_camera
+# Both directories exist on the device and both are EMPTY. Declared here,
+# labelled in file_contexts, granted in the two .te files — all three are
+# needed, since a grant against a type nothing carries is silently dead.
+type vendor_gf_data_file, file_type, data_file_type;
+type vendor_watermark_data_file, file_type, data_file_type;
+
+# /sys/devices/platform/odm/odm:tran_battery/tran_cam -- a Transsion camera node
+# the 3A (auto-exposure/AWB) thread opens during camera teardown. itel labels it
+# sysfs_tran_cam_file; device/mediatek/sepolicy_vndr has no such type, so it is
+# generic sysfs here and mtk_hal_camera may not read it.
+#
+# MEASURED on build 62, and the consequence is not a quiet denial:
+#   avc: denied { read } comm="AFthread" name="tran_cam" tcontext=u:object_r:sysfs:s0
+#   ...
+#   Abort message: 'FORTIFY: fscanf: null FILE*'
+#     #03 libcam.hal3a.v3.platform.so  Hal3ARawImp::uninit()
+# The HAL fopen()s the node, SELinux refuses, fopen returns NULL, and the
+# unchecked fscanf(NULL) trips FORTIFY and kills camerahalserver. A denial
+# turning into a process abort three frames later.
+type sysfs_tran_cam_file, fs_type, sysfs_type;
+
+# /sys/devices/virtual/torch/torch/torch_level and
+# /sys/devices/virtual/sub_torch/sub_torch/sub_torch_level — the flash LED
+# brightness controls for the main and sub cameras. Exactly the tran_cam defect
+# above, and found the same way: unlabelled here, so the 3A thread's fopen()
+# returns NULL and the unchecked fscanf(NULL) trips FORTIFY inside
+# Hal3ARawImp::uninit(), killing camerahalserver three frames from the denial.
+# Both surfaced only once the v31 namespace let the camera get far enough to
+# reach teardown.
+#
+# Verified 2026-08-13, against stock rev 28 and against this unit:
+#   stock vendor_sepolicy.cil   declares sysfs_torch_file / sysfs_sub_torch_file
+#                               and genfscons exactly these two paths
+#   live device                 both nodes exist, both generic u:object_r:sysfs:s0
+#   wide_torch                  does NOT exist on this unit, so no label is
+#                               written for it — a label matching nothing is
+#                               dead weight (BLUEPRINT §9)
+type sysfs_torch_file, fs_type, sysfs_type;
+type sysfs_sub_torch_file, fs_type, sysfs_type;
+
+# /sys/devices/platform/charger/tran_aichg_disable_charger — the bypass-charging
+# node. device/mediatek/sepolicy_vndr labels several of its siblings
+# (sysfs_vbus, sysfs_pump_express, sysfs_fs_chg_file, sysfs_batteryinfo,
+# sysfs_battery_warning) but not this one, so it is generic sysfs there and the
+# type does not exist. Declared here; see genfs_contexts for the label and
+# system_app.te for the grant. All three are needed — a grant against a type
+# nothing carries is silently dead.
+type sysfs_aichg_file, fs_type, sysfs_type;

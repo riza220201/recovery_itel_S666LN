@@ -1,0 +1,85 @@
+<!--
+    Device VINTF manifest for RECOVERY only.
+
+    WHY THIS FILE EXISTS
+    ~~~~~~~~~~~~~~~~~~~~
+    servicemanager refuses to register any VINTF-stability binder that is not
+    declared in a manifest (frameworks/native/cmds/servicemanager/ServiceManager.cpp,
+    meetsDeclarationRequirements calls isVintfDeclared). Without it:
+
+      servicemanager: Could not find android.hardware.security.keymint.IKeyMintDevice/default
+                      in the VINTF manifest.
+      keymint-service.trustonic: Check failed: status == STATUS_OK   [SIGABRT]
+
+    and keystore2 then never comes up, so TWRP blocks forever in
+    waitForService(IKeystoreService) and never draws its UI. That is the
+    "stuck on the splash screen" symptom, four layers down.
+
+    WORSE: keystore2 calls getDeviceHalManifest() itself and dereferences the
+    result without a null check, so a device manifest that is MISSING or
+    UNPARSEABLE crashes it outright:
+
+      keystore2: getDeviceHalManifest: -22 VINTF parse error ...
+      keystore2: Fatal signal 11 (SIGSEGV), fault addr 0x0 in Binder:_2
+
+    That was the original SIGSEGV. A *framework* manifest does NOT fix it;
+    tested on the device, keymint registered fine from a framework manifest and
+    keystore2 still segfaulted. The DEVICE manifest is the one that must parse.
+
+    [!] VERSION 4.0, NOT 5.0. PBRP's libvintf is kMetaVersion{4,0}
+    (system/libvintf/include/vintf/constants.h) and rejects the whole file:
+        Illformed file: /vendor/etc/vintf/manifest.xml:
+        Unrecognized manifest.version 5.0 (libvintf@4.0)
+    crDroid's own /vendor manifest declares 5.0, so the ROM's manifest can NEVER
+    be used here even when /vendor is mounted. Do not "sync" this file with it.
+
+    [!] This must not be shadowed. /vendor is deliberately NOT mounted during
+    recovery startup, which is also why the trustlets are carried in the ramdisk
+    instead of being read from /vendor. See init.recovery.mt6789.rc.
+
+    [!] No "- -" sequence is legal inside an XML comment. An earlier draft used
+    dashes as section underlines and expat rejected the file at line 5, which
+    would have traded one unparseable manifest for another.
+
+    Contents are the subset recovery actually needs, copied from the entries in
+    the ROM's manifest, plus keystore2 (a VINTF-stability service, so it is
+    checked too: keystore2 panics with "Failed to register service ... because
+    of UNKNOWN_ERROR" without this entry).
+-->
+<manifest version="4.0" type="device">
+    <hal format="aidl">
+        <name>android.hardware.security.keymint</name>
+        <fqname>IKeyMintDevice/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.security.keymint</name>
+        <fqname>IRemotelyProvisionedComponent/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.security.secureclock</name>
+        <fqname>ISecureClock/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.hardware.security.sharedsecret</name>
+        <fqname>ISharedSecret/default</fqname>
+    </hal>
+    <hal format="hidl">
+        <name>android.hardware.gatekeeper</name>
+        <transport>hwbinder</transport>
+        <version>1.0</version>
+        <interface>
+            <name>IGatekeeper</name>
+            <instance>default</instance>
+        </interface>
+        <fqname>@1.0::IGatekeeper/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>android.system.keystore2</name>
+        <fqname>IKeystoreService/default</fqname>
+    </hal>
+    <hal format="hidl">
+        <name>android.hardware.health</name>
+        <transport arch="32+64">passthrough</transport>
+        <fqname>@2.0::IHealth/default</fqname>
+    </hal>
+</manifest>

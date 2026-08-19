@@ -1,0 +1,45 @@
+# ANDROID-FORMAT fstab for the itel RS4 (S666LN, MT6789) in recovery.
+#
+# 🔴 FORMAT MATTERS. An earlier version of this file used TWRP's v1 syntax
+# (`/system erofs /dev/block/mapper/system flags=display="System";backup=1`).
+# TWRP parses that, but libfs_mgr does NOT -- and libfs_mgr is what maps the
+# DYNAMIC partitions out of super. It failed with
+#     [libfs_mgr]ReadFstabFromFile(): failed to load fstab from '/etc/recovery.fstab'
+# so recovery had no partitions at all and hung on the splash screen.
+#
+# TWRP-specific extras (display names, backup targets) live in twrp.flags
+# instead -- partitionmanager.cpp:276 reads /system/etc/twrp.flags for exactly
+# that purpose. Keep the two in step.
+#
+# <src>                            <mnt_point>            <type>  <mnt_flags>                        <fs_mgr_flags>
+system                             /system                erofs   ro                                 wait,slotselect,logical,first_stage_mount
+system_ext                         /system_ext            erofs   ro                                 wait,slotselect,logical,first_stage_mount
+vendor                             /vendor                erofs   ro                                 wait,slotselect,logical,first_stage_mount
+product                            /product               erofs   ro                                 wait,slotselect,logical,first_stage_mount
+vendor_dlkm                        /vendor_dlkm           ext4    ro                                 wait,slotselect,logical,first_stage_mount
+odm_dlkm                           /odm_dlkm              ext4    ro                                 wait,slotselect,logical,first_stage_mount
+
+/dev/block/by-name/metadata        /metadata              ext4    noatime,nosuid,nodev,discard       wait,formattable,first_stage_mount
+/dev/block/by-name/userdata        /data                  f2fs    noatime,nosuid,nodev,discard       wait,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized,keydirectory=/metadata/vold/metadata_encryption
+
+/dev/block/by-name/persist         /mnt/vendor/persist    ext4    noatime,nosuid,nodev               wait
+/dev/block/by-name/nvdata          /mnt/vendor/nvdata     ext4    noatime,nosuid,nodev               wait
+/dev/block/by-name/nvcfg           /mnt/vendor/nvcfg      ext4    noatime,nosuid,nodev               wait
+/dev/block/by-name/protect1        /mnt/vendor/protect_f  ext4    noatime,nosuid,nodev               wait
+/dev/block/by-name/protect2        /mnt/vendor/protect_s  ext4    noatime,nosuid,nodev               wait
+/dev/block/by-name/tranfs          /tranfs                ext4    noatime,nosuid,nodev               wait
+
+/dev/block/by-name/boot            /boot                  emmc    defaults                           defaults,slotselect
+/dev/block/by-name/init_boot       /init_boot             emmc    defaults                           defaults,slotselect
+/dev/block/by-name/vendor_boot     /vendor_boot           emmc    defaults                           defaults,slotselect
+/dev/block/by-name/dtbo            /dtbo                  emmc    defaults                           defaults,slotselect
+/dev/block/by-name/vbmeta          /vbmeta                emmc    defaults                           defaults,slotselect
+/dev/block/by-name/vbmeta_system   /vbmeta_system         emmc    defaults                           defaults,slotselect
+/dev/block/by-name/vbmeta_vendor   /vbmeta_vendor         emmc    defaults                           defaults,slotselect
+/dev/block/by-name/md1img          /md1img                emmc    defaults                           defaults,slotselect
+/dev/block/by-name/logo            /logo                  emmc    defaults                           defaults,slotselect
+/dev/block/by-name/misc            /misc                  emmc    defaults                           defaults
+/dev/block/by-name/frp             /frp                   emmc    defaults                           defaults
+/dev/block/by-name/nvram           /nvram                 emmc    defaults                           defaults
+/dev/block/by-name/proinfo         /proinfo               emmc    defaults                           defaults
+

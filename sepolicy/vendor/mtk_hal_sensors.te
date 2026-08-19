@@ -1,0 +1,74 @@
+# MediaTek's sensors multihal, measured on hardware 2026-08-11 (build 34).
+#
+# Without these two rules the service does not merely log noise -- it ABORTS,
+# every five seconds, 75 times in one boot. Its own log names the first one:
+#
+#   [libfs_mgr]ReadFstabFromFile(): failed to access() DSU booted indicator:
+#                                   Permission denied
+#   [libfs_mgr]ReadDefaultFstab(): failed to find device default fstab
+#   ... then abort
+#
+# libfs_mgr checks for the DSU indicator under /sys/firmware/devicetree, and
+# reads the fstab, before the multihal can enumerate its sub-HALs. Denied, it
+# throws, and nothing catches it.
+#
+# The denial counts are what identified this over the other candidates:
+#
+#   5904  mtk_hal_sensors -> sysfs_dt_firmware_android : dir { search }
+#   1476  mtk_hal_sensors -> metadata_file : dir { search }
+#
+# 7,380 records in one boot from a single domain is not a HAL that works and
+# complains; it is a HAL in a crash loop.
+#
+# `search` on a directory only, not read or open on its contents: this is a
+# path-traversal grant so libfs_mgr can stat() what it is looking for, and it
+# is the narrowest thing that makes the check possible. Both target types are
+# upstream, so nothing is declared here.
+# 🔴 The first attempt granted only `dir search` on both, which was measured
+# from build 34's denials -- and those were only the denials the HAL reached
+# before dying. Build 38 got one step further and produced the next layer:
+#
+#   371  mtk_hal_sensors -> sysfs_dt_firmware_android : file { read }  name="compatible"
+#    93  mtk_hal_sensors -> gsi_metadata_file         : dir  { search } name="gsi"
+#
+# A denial log shows where execution STOPPED, not everything it will need. Grant
+# the whole access pattern the caller performs, or expect to iterate once per
+# boot -- which is what happened here.
+#
+# read_fstab() is AOSP's macro for exactly this caller (te_macros): it covers
+# metadata_file and gsi_metadata_file_type dir search, gsi_public_metadata_file,
+# and proc_bootconfig/proc_cmdline. It does NOT cover the devicetree node, so
+# that stays explicit.
+read_fstab(mtk_hal_sensors)
+allow mtk_hal_sensors sysfs_dt_firmware_android:dir search;
+allow mtk_hal_sensors sysfs_dt_firmware_android:file r_file_perms;
+
+# Build 40, the layer after the fstab read succeeded:
+#
+#   mtk_hal_sensors -> nvdata_file : dir { search }    dev=sdc8, /mnt/vendor/nvdata
+#
+# Upstream describes this caller precisely and then stops one directory short.
+# `sepolicy_vndr/basic/non_plat/mtk_hal_sensors.te:69`:
+#
+#   # Purpose: Allow to search /mnt/vendor/nvdata for fstab when using NVM_Init()
+#   allow mtk_hal_sensors mnt_vendor_file:dir search;
+#
+# `/mnt/vendor` is mnt_vendor_file but `/mnt/vendor/nvdata(/.*)?` is nvdata_file
+# (file_contexts:935), so that grant reaches the mount point and nothing inside
+# it. The stated purpose is unreachable with the rule written for it.
+#
+# Granting the read pattern whole rather than the one measured permission, per
+# the lesson above -- `dir search` alone gets us to the next boot and the next
+# denial. Upstream's own reader of this partition is the shape copied here:
+#
+#   allow wlan_assistant nvdata_file:dir  r_dir_perms;
+#   allow wlan_assistant nvdata_file:file r_file_perms;
+#
+# Read-only deliberately. The nvdata writers upstream (nvram_daemon,
+# mtk_hal_nvramagent, rild) take create_dir_perms/create_file_perms; this HAL
+# does not need them, because upstream already routes its calibration WRITES
+# through sensor_data_file and nvcfg_file (both create_file_perms, lines 59-65).
+# nvdata here is a lookup, not a store. If a write denial ever appears, that is
+# new information and belongs measured, not pre-granted.
+allow mtk_hal_sensors nvdata_file:dir r_dir_perms;
+allow mtk_hal_sensors nvdata_file:file r_file_perms;

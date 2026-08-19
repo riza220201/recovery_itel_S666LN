@@ -1,0 +1,114 @@
+# Trustonic TEE + keymint in recovery. This is what makes FBE decryption work,
+# and therefore what makes a backup of internal storage non-empty.
+#
+# Derived from STOCK's own etc/init/trustonic.rc (paths rewritten), never from
+# another recovery's ramdisk: importing from the artifact this replaces would
+# smuggle back the dependency the project exists to remove.
+#
+# TRUSTLETS LIVE IN THE RAMDISK (this reverses the earlier "option 1" choice).
+# The original plan mounted /vendor and passed -r paths into it, to save 8.5 MB.
+# That cannot work here, for a reason that only showed up on the device:
+# /vendor's own VINTF manifest declares manifest.version 5.0, and PBRP's
+# libvintf is kMetaVersion{4,0}. The moment /vendor is mounted, its manifest
+# shadows ours, libvintf rejects the whole file, and keystore2 SIGSEGVs on the
+# null manifest. So /vendor must stay UNMOUNTED, and the 8.5 MB is the price of
+# that. vendor_boot has room: the image was 31.5 MB of a 64 MiB partition.
+#
+# The paths below are unchanged from stock (/vendor/app/mcRegistry/...) and now
+# resolve against the ramdisk copy instead of the real partition.
+#
+# [!] The stock rc passed 29 -r arguments; only 9 of those .drbin files exist
+# in this device's blob set. mcDriverDaemon tolerates the missing ones silently,
+# which is exactly why it went unnoticed. This list is generated from the files
+# actually present.
+#
+# [!] --P1 /mnt/vendor/persist/mcRegistry is also required; persist must be
+# mounted before mcDriverDaemon starts. That requirement is easy to miss from
+# the recipe alone.
+
+on post-fs
+    # persist is a plain physical partition; mount it early and read-only.
+    # Read-only is deliberate: recovery has no business writing the secure
+    # storage area, and metadata decryption was verified working with it ro.
+    wait /dev/block/by-name/persist 5
+    mkdir /mnt/vendor/persist 0771 root root
+    mount ext4 /dev/block/by-name/persist /mnt/vendor/persist ro nosuid nodev noatime
+    # [!] START THEM HERE, EXPLICITLY. `class main` is NOT enough: recovery's
+    # init never issues class_start, so a class-only service is never started
+    # at all. Verified on the device -- `grep -rn class_start /init.rc
+    # /system/etc/init/*.rc` returns NOTHING, mcDriverDaemon and keymint were
+    # both absent at the TWRP main menu, and keystore2 was running only because
+    # its own rc carries an explicit `on late-init / start keystore2`.
+    #
+    # This is the SECOND dead trigger in this file. The first was
+    #     on property:twrp.vendor.mounted=1
+    # a property nothing ever sets. Both failed the same silent way: init parses
+    # the file, defines the services, and simply never runs them.
+    #
+    # `on post-fs` is used rather than `on late-init` because late-init fires
+    # BEFORE post-fs, and mcDriverDaemon needs --P1 /mnt/vendor/persist/mcRegistry
+    # which the mount directly above provides. Confirmed live: persist is
+    # mounted at the main menu, so this trigger does fire.
+    start mobicore
+    start vendor.keymint-trustonic
+
+service mobicore /system/bin/mcDriverDaemon --sfs-reformat --P1 /mnt/vendor/persist/mcRegistry \
+	-r /vendor/app/mcRegistry/020f0000000000000000000000000000.drbin \
+	-r /vendor/app/mcRegistry/031c0000000000000000000000000000.drbin \
+	-r /vendor/app/mcRegistry/05070000000000000000000000000000.drbin \
+	-r /vendor/app/mcRegistry/05120000000000000000000000000001.drbin \
+	-r /vendor/app/mcRegistry/06090000000000000000000000000000.drbin \
+	-r /vendor/app/mcRegistry/07170000000000000000000000000000.drbin \
+	-r /vendor/app/mcRegistry/08050000000000000000000000003419.drbin \
+	-r /vendor/app/mcRegistry/40188311faf343488db888ad39496f9a.drbin \
+	-r /vendor/app/mcRegistry/5020170115e016302017012521300000.drbin
+    class main
+    user root
+    group root system drmrpc
+    seclabel u:r:recovery:s0
+
+# keymint and gatekeeper follow mobicore in file order so init starts them
+# after it. If one still loses the race it aborts and init restarts it, which
+# is self-healing; the `interface` lines additionally let servicemanager
+# lazy-start them on demand, which is how keystore2 reaches keymint.
+service vendor.keymint-trustonic /system/bin/hw/android.hardware.security.keymint-service.trustonic
+    interface aidl android.hardware.security.keymint.IKeyMintDevice/default
+    interface aidl android.hardware.security.keymint.IRemotelyProvisionedComponent/default
+    interface aidl android.hardware.security.secureclock.ISecureClock/default
+    interface aidl android.hardware.security.sharedsecret.ISharedSecret/default
+    class main
+    user root
+    seclabel u:r:recovery:s0
+
+# [!] GATEKEEPER IS DELIBERATELY NOT STARTED, and its binary is left in place
+# only so this note has something to point at.
+#
+# android.hardware.gatekeeper@1.0-service is a passthrough shim. It dlopens an
+# implementation and dies without one:
+#     E LegacySupport: Could not get passthrough implementation for
+#       android.hardware.gatekeeper@1.0::IGatekeeper/default
+#     init: Service 'vendor.gatekeeper-1-0' exited with status 1
+# and init then restarts it forever.
+#
+# The chain is impl.so -> gatekeeper.trustonic.so (a symlink to
+# libMcGatekeeper.so) -> libgatekeeper.so + libhardware.so. The last two are
+# NOT in the stock vendor blob set -- they are platform libraries from /system,
+# which recovery does not mount. Shipping gatekeeper therefore means importing
+# a chain of system libs.
+#
+# It buys nothing here: gatekeeper authenticates a lockscreen credential, and
+# this device has no screen lock, so TWRP takes the default-password path
+# (Decrypt_Device("!")) which never calls it. Metadata decryption does not use
+# it either -- proven on the device, where the metadata key unwrapped correctly
+# with only mobicore and keymint running.
+#
+# If a PIN is ever set, revisit: import the impl plus libgatekeeper.so and
+# libhardware.so, and restore `start vendor.gatekeeper-1-0` above.
+
+# [!] The previous version gated all three of these on
+#     on property:twrp.vendor.mounted=1
+# That property does not exist. Nothing in bootable/recovery ever sets it, so
+# the trigger never fired and none of these services ever started, which is why
+# keymint was absent and TWRP hung in waitForService() before drawing its UI.
+# Verified on the device: `getprop twrp.vendor.mounted` is empty at the TWRP
+# main menu.

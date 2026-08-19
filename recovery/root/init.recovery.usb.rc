@@ -1,0 +1,144 @@
+# ConfigFS USB gadget for recovery -- OVERRIDES TWRP's init.recovery.usb.rc.
+#
+# 🔴 TWRP's stock recovery USB rc drives the LEGACY android_usb interface:
+#     write /sys/class/android_usb/android0/enable 0
+#     write /sys/class/android_usb/android0/functions adb
+# That interface does not exist on MT6789 with a 5.10 kernel -- this device uses
+# ConfigFS, as device_itel_S666LN/rootdir/etc/init/hw/init.mt6789.usb.rc shows
+# (366 configfs lines). The result was no gadget at all: no adb, no MTP, and
+# nothing enumerating on the host (lsusb showed only root hubs).
+#
+# Modelled on the ROM's own usb rc.
+#
+# [!] MTP WAS ADDED HERE ON 2026-08-19 AND REVERTED THE SAME DAY. Do not
+# re-add it in this shape.
+#
+# TWRP's Enable_MTP() drives the LEGACY android_usb interface, which does not
+# exist on this device, so the gadget had to be rebuilt from an init trigger.
+# The block did:
+#     write /config/usb_gadget/g1/UDC ""        <- unbind the WORKING adb gadget
+#     rm .../configs/b.1/f1 ; symlink ffs.mtp -> f1 ; ffs.adb -> f2
+#     write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+# and when that rebind fails the gadget is left UNBOUND: no MTP *and no adb*.
+# That is what happened -- operator reported PitchBlack running normally, clock
+# and temperature fine, but nothing on USB at all and no sideload.
+#
+# It shipped in two earlier builds without being noticed because TWRP was
+# hanging on the boot HAL before it ever reached the MTP step. Fixing that hang
+# ran this code for the first time. The warning was already in the logs and I
+# read it as harmless:
+#     init: Command 'symlink ... f1' failed: File exists
+#     init: Command 'write ... UDC' failed: Device or resource busy
+#
+# Doing this properly means the ROM's approach: one gadget carrying both
+# functions, with adbd stopped and restarted around any reconfiguration
+# (init.mt6789.usb.rc does it in 366 lines). That is a separate change to make
+# and test on its own, not a rider on a decryption fix. MTP also buys nothing
+# until FBE decryption works, because internal storage has nowhere valid to
+# write.
+#
+# The UDC name comes from the ROM: setprop sys.usb.controller "musb-hdrc".
+
+on init
+    mkdir /dev/usb-ffs 0775 shell shell
+    mkdir /dev/usb-ffs/adb 0770 shell shell
+    mount configfs none /config
+    mkdir /config/usb_gadget/g1 0770 shell shell
+    write /config/usb_gadget/g1/idVendor 0x18D1
+    write /config/usb_gadget/g1/idProduct 0xD001
+    write /config/usb_gadget/g1/bcdDevice 0x0223
+    write /config/usb_gadget/g1/bcdUSB 0x0200
+    mkdir /config/usb_gadget/g1/strings/0x409 0770
+    write /config/usb_gadget/g1/strings/0x409/serialnumber ${ro.serialno}
+    write /config/usb_gadget/g1/strings/0x409/manufacturer ${ro.product.manufacturer}
+    write /config/usb_gadget/g1/strings/0x409/product "PitchBlack Recovery"
+    mkdir /config/usb_gadget/g1/functions/ffs.adb
+    mkdir /config/usb_gadget/g1/configs/b.1 0770 shell shell
+    mkdir /config/usb_gadget/g1/configs/b.1/strings/0x409 0770 shell shell
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "adb"
+    write /config/usb_gadget/g1/configs/b.1/MaxPower 500
+    mount functionfs adb /dev/usb-ffs/adb rmode=0770,fmode=0660,uid=2000,gid=2000,no_disconnect=1
+    # MTP endpoints. Created here but NOT bound; the gadget is only rebuilt by
+    # the mtp,adb trigger at the bottom, once the MTP server has written its
+    # descriptors.
+    mkdir /dev/usb-ffs/mtp 0770 shell shell
+    mkdir /config/usb_gadget/g1/functions/ffs.mtp
+    mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=2000,gid=2000,no_disconnect=1
+    setprop sys.usb.controller "musb-hdrc"
+
+on boot
+    setprop sys.usb.configfs 1
+    start adbd
+
+# Bring the gadget up once adbd has opened the functionfs endpoints. Writing UDC
+# before that leaves a gadget the host sees but cannot talk to.
+on property:sys.usb.ffs.ready=1
+    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f1
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop sys.usb.state adb
+
+service adbd /system/bin/adbd --root_seclabel=u:r:su:s0
+    disabled
+    socket adbd seqpacket 660 system system
+    seclabel u:r:recovery:s0
+
+# --- MTP.
+#
+# WHY THIS IS NEEDED AT ALL
+# TWRP's own /system/etc/init/hw/init.rc already implements the ConfigFS gadget
+# and owns it. It has triggers for exactly four configs:
+#     sys.usb.config = adb | fastboot | sideload | none
+# and the word "mtp" does not appear in it anywhere.
+#
+# Enable_MTP() (partitionmanager.cpp:2913) sets sys.usb.config=none and then
+# mtp,adb. The `none` trigger (init.rc:190) does:
+#     write /config/usb_gadget/g1/UDC "none"
+#     stop adbd
+#     setprop sys.usb.ffs.ready 0
+#     rm /config/usb_gadget/g1/configs/b.1/f1
+# and then NOTHING matches mtp,adb -- so the gadget stays unbound and adbd
+# stays stopped. That is the "enabling MTP makes both MTP and adb disappear,
+# disabling it brings them back" behaviour the operator reported: disabling
+# sets sys.usb.config=adb, which DOES have a trigger, so everything returns.
+#
+# It also explains why processes started over adb kept dying mid-test: `stop
+# adbd` kills the service's whole cgroup, which includes anything spawned from
+# an adb shell, setsid or not.
+#
+# [!] An earlier attempt did the unbind/rebind by hand from a
+# sys.usb.ffs.mtp.ready=1 trigger. That fought init.rc for ownership of the
+# gadget and left it unbound -- no MTP AND no adb. Do not reintroduce it. The
+# two blocks below instead fill in the case init.rc is missing, in its style.
+
+# STAGE 1 -- reconfigure. init.rc's `none` trigger already unbound the UDC and
+# stopped adbd, but it only removes f1, and f1 is ffs.adb. Both links must go,
+# and adbd must be RESTARTED so it reopens its functionfs endpoints: proven on
+# the device, where relinking f1=ffs.mtp/f2=ffs.adb and rebinding by hand gave
+# a working MTP but dead adb, because adbd still held the endpoints it had
+# opened before the unbind.
+#
+# adbd sets sys.usb.ffs.ready itself once it has reopened them, which is what
+# stage 2 waits for.
+on property:sys.usb.config=mtp,adb
+    write /config/usb_gadget/g1/UDC ""
+    stop adbd
+    setprop sys.usb.ffs.ready 0
+    rm /config/usb_gadget/g1/configs/b.1/f1
+    rm /config/usb_gadget/g1/configs/b.1/f2
+    symlink /config/usb_gadget/g1/functions/ffs.mtp /config/usb_gadget/g1/configs/b.1/f1
+    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f2
+    start adbd
+
+# STAGE 2 -- bind, once BOTH functions are ready: adbd has reopened ffs.adb
+# (sys.usb.ffs.ready) and the MTP server has written its descriptors to ffs.mtp
+# (sys.usb.ffs.mtp.ready, MtpDescriptors.cpp:280). Binding earlier gives the
+# host a device it cannot talk to.
+#
+# [!] Splitting this in two is the point. Doing the relink and the UDC write in
+# one block cannot work: `start adbd` is asynchronous, so the UDC would be
+# written before adbd had reopened anything.
+on property:sys.usb.config=mtp,adb && property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE2
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "mtp_adb"
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop sys.usb.state ${sys.usb.config}

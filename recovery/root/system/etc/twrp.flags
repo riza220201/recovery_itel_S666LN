@@ -1,0 +1,50 @@
+# TWRP-specific flags. partitionmanager.cpp:276 reads /system/etc/twrp.flags.
+# The MOUNTS live in recovery.fstab (Android format, so libfs_mgr can map the
+# dynamic partitions); this file only adds display names and backup targets.
+#
+# ⚠ nvdata/nvcfg/protect1/protect2/nvram/proinfo carry the IMEI and radio
+# calibration, and md1img is the modem image. A "full backup" that omits them
+# restores a phone with no radio identity.
+/system         erofs   /dev/block/mapper/system            flags=display="System";logical;slotselect;backup=1
+/system_ext     erofs   /dev/block/mapper/system_ext        flags=display="System_ext";logical;slotselect;backup=1
+/vendor         erofs   /dev/block/mapper/vendor            flags=display="Vendor";logical;slotselect;backup=1
+/product        erofs   /dev/block/mapper/product           flags=display="Product";logical;slotselect;backup=1
+/vendor_dlkm    ext4    /dev/block/mapper/vendor_dlkm       flags=display="Vendor_dlkm";logical;slotselect;backup=1
+/odm_dlkm       ext4    /dev/block/mapper/odm_dlkm          flags=display="Odm_dlkm";logical;slotselect;backup=1
+/data           f2fs    /dev/block/by-name/userdata         flags=display="Data";backup=1;wipeingui
+/metadata       ext4    /dev/block/by-name/metadata         flags=display="Metadata";backup=1
+/boot           emmc    /dev/block/by-name/boot             flags=display="Boot";slotselect;backup=1;flashimg=1
+/init_boot      emmc    /dev/block/by-name/init_boot        flags=display="Init Boot";slotselect;backup=1;flashimg=1
+/vendor_boot    emmc    /dev/block/by-name/vendor_boot      flags=display="Vendor Boot";slotselect;backup=1;flashimg=1
+/dtbo           emmc    /dev/block/by-name/dtbo             flags=display="Dtbo";slotselect;backup=1;flashimg=1
+/md1img         emmc    /dev/block/by-name/md1img           flags=display="Modem";slotselect;backup=1;flashimg=1
+/logo           emmc    /dev/block/by-name/logo             flags=display="Logo";slotselect;backup=1;flashimg=1
+/mnt/vendor/nvdata     ext4  /dev/block/by-name/nvdata      flags=display="NVDATA";backup=1;wipeingui=0
+/mnt/vendor/nvcfg      ext4  /dev/block/by-name/nvcfg       flags=display="NVCFG";backup=1;wipeingui=0
+/mnt/vendor/persist    ext4  /dev/block/by-name/persist     flags=display="Persist";backup=1;wipeingui=0
+/mnt/vendor/protect_f  ext4  /dev/block/by-name/protect1    flags=display="Protect_f";backup=1;wipeingui=0
+/mnt/vendor/protect_s  ext4  /dev/block/by-name/protect2    flags=display="Protect_s";backup=1;wipeingui=0
+/nvram          emmc    /dev/block/by-name/nvram            flags=display="NVRAM";backup=1;flashimg=1;wipeingui=0
+/proinfo        emmc    /dev/block/by-name/proinfo          flags=display="Proinfo";backup=1;flashimg=1;wipeingui=0
+/external_sd    auto    /dev/block/mmcblk1p1  /dev/block/mmcblk1  flags=display="MicroSD";storage;wipeingui;removable
+/usb_otg        auto    /dev/block/sda1       /dev/block/sda      flags=display="USB-OTG";storage;removable
+
+# --- partitions added 2026-08-19 after operator review of the Advanced Wipe list.
+#
+# [!] `wipeingui=0` above is NOT the main fix. These partitions appeared in
+# Advanced Wipe because recovery.fstab marked them `formattable`, and
+# partition.cpp:1061 treats formattable and wipeingui identically:
+#     case TWFLAG_WIPEINGUI:
+#     case TWFLAG_FORMATTABLE:
+#         Wipe_Available_in_GUI = val;
+# `formattable` also authorises fs_mgr to REFORMAT a partition whose mount
+# fails, which on nvdata means losing the IMEI. It has been removed from all of
+# them in recovery.fstab; wipeingui=0 is the belt to that braces.
+#
+# backup=1 is kept deliberately: nvdata/nvcfg/protect* carry the radio
+# calibration and IMEI, so they are the partitions most worth having a backup
+# of. Backing up is safe; wiping is not.
+/tranfs         ext4    /dev/block/by-name/tranfs           flags=display="Tranfs";backup=1;wipeingui=0
+# frp DOES exist on this device: /dev/block/by-name/frp -> /dev/block/sdc6, 1 MiB.
+# It was simply never listed, which is why it did not appear in the GUI.
+/frp            emmc    /dev/block/by-name/frp              flags=display="FRP";backup=1;flashimg=1;wipeingui=0

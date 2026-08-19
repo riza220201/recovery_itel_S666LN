@@ -1,0 +1,28 @@
+--- a/build/make/core/version_defaults.mk
++++ b/build/make/core/version_defaults.mk
+@@ -88,7 +88,24 @@
+ # The last stable version name of the platform that was released.  During
+ # development, this stays at that previous version, while the codename indicates
+ # further work based on the previous version.
+-PLATFORM_VERSION_LAST_STABLE := 12
++# [itel RS4 / PBRP] 12 -> 13.
++#
++# KeyMint binds every key blob to an os_version taken from
++# ro.build.version.release. The ROM that created this device's keys is crDroid
++# 13; a recovery claiming 12 is a ROLLBACK, and the TEE answers
++# KM_ERROR_INVALID_KEY_BLOB (-33) rather than decrypting /data.
++#
++# This tree already sets PLATFORM_SDK_VERSION=33 (Android 13's SDK), so 12 was
++# already inconsistent with its own SDK level.
++#
++# It has to be here. version_defaults.mk is included from envsetup.mk:68, while
++# product_config.mk is line 312 and board_config.mk is line 323, so NEITHER a
++# product makefile nor BoardConfig.mk can set PLATFORM_VERSION -- the `ifndef`
++# at line ~130 has already fired. An environment variable does not work either:
++# soong scrubs it (PLATFORM_VERSION appears 0 times in
++# out/soong/soong.environment.used). Both were tried and both silently produced
++# ro.build.version.release=12 in the built image, with no build error.
++PLATFORM_VERSION_LAST_STABLE := 13
+ 
+ # These are the current development codenames, if the build is not a final
+ # release build.  If this is a final release build, it is simply "REL".

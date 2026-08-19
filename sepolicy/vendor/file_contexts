@@ -1,0 +1,115 @@
+# Domains this tree adds.
+/vendor/bin/pnpmgr                                                              u:object_r:pnpmgr_exec:s0
+/vendor/bin/kmsetkey_ca\.trustonic                                              u:object_r:trustonic_kmsetkey_ca_exec:s0
+
+# Stock's Wi-Fi HAL, shipped under a renamed path.
+#
+# proprietary-files.txt installs stock's android.hardware.wifi@1.0-service-lazy
+# as ...-service-stock, because both it and libwifi-hal are unconditional kati
+# modules and collide otherwise (build 55). Upstream labels the two stock
+# spellings and neither matches ours:
+#
+#   system/sepolicy/vendor/file_contexts:102  ...wifi@1\.0-service
+#   system/sepolicy/vendor/file_contexts:103  ...wifi@1\.0-service-lazy
+#
+# Without this the binary lands as plain vendor_file, init finds no domain
+# transition and refuses to exec it under enforcing -- trading a build failure
+# for a silently missing HAL. BLUEPRINT §9: "a vendor init service needs an
+# exec type".
+#
+# hal_wifi_default_exec is the right type, not a new one: it puts the service in
+# hal_wifi_default, which carries the hal_wifi attribute, and MediaTek's own
+# policy grants that attribute the node this HAL exists to write --
+#   sepolicy_vndr/basic/non_plat/hal_wifi.te:7
+#     allow hal_wifi wmtWifi_device:chr_file w_file_perms;
+#   sepolicy_vndr/basic/non_plat/file_contexts:464
+#     /dev/wmtWifi(/.*)?  u:object_r:wmtWifi_device:s0
+# which is the write that powers the chip and creates wlan0. Verified on
+# lineage-20.0, the branch this tree builds.
+/(vendor|system/vendor)/bin/hw/android\.hardware\.wifi@1\.0-service-stock       u:object_r:hal_wifi_default_exec:s0
+
+# Stock's vibrator HAL, shipped under a renamed path. SAME TRAP AS THE WI-FI
+# ENTRY ABOVE, and it cost build 69's boot.
+#
+# extract-files.sh repoints vibrator-mtk-default.rc at
+#   /vendor/bin/hw/android.hardware.vibrator-service.mediatek-stock
+# Upstream labels only the unsuffixed spelling, so nothing matched ours:
+#   vendor_file_contexts:192  ...vibrator-service\.mediatek -> hal_vibrator_default_exec
+# and the binary landed as plain vendor_file. init found no domain transition,
+# the service never ran, and IVibrator/IVibratorManager -- BOTH declared by
+# configs/vintf/manifest/vibrator-mtk-default.xml -- never registered.
+#
+# The symptom was a hang at the boot animation, not a missing vibration:
+# something calls waitForService on the DECLARED IVibratorManager and blocks,
+# which ramoops showed as one line per second for the whole window:
+#   init: Control message: Could not find
+#     'aidl/android.hardware.vibrator.IVibratorManager/default'
+#     for ctl.interface_start from pid: 327 (/system/bin/servicemanager)
+#
+# 🔑 A declared-but-never-registered interface is a BOOT blocker, not a degraded
+# feature -- the same shape as build 68's keystore2 hang one flash earlier.
+# Whenever a blob is renamed, check the label: a rename that resolves its
+# DT_NEEDED is not a rename that runs.
+/(vendor|system/vendor)/bin/hw/android\.hardware\.vibrator-service\.mediatek-stock  u:object_r:hal_vibrator_default_exec:s0
+
+# Character devices.
+/dev/tranlog_ctl                                                                u:object_r:tranlog_device:s0
+/dev/ntsync                                                                     u:object_r:ntsync_device:s0
+
+# The NFC controller node. This board is NXP — pn553.ko, init.nxp.nfc.rc — and
+# device/mediatek/sepolicy_vndr labels only the ST variant of this reference
+# design (basic/non_plat/hal_nfc.te:5 grants st21nfc_device, file_contexts
+# labels /dev/st21nfc). So the node this device actually has was left as generic
+# `device`, which no vendor domain may open.
+#
+# MEASURED, and this is the whole of it: the HAL process ran, but
+# android.hardware.nfc@1.2::INfc/default was never REGISTERED (lshal server pid
+# N/A) because it could not open the controller, so `svc nfc enable` was a
+# silent no-op and dumpsys nfc stayed mState=off on every build this tree has
+# produced. NFC has never worked here; the 2026-08-12 note recording it as
+# working measured the HAL not crashing, which is not the same thing.
+#
+# Proven live on build 61 before this line was written — one variable, nothing
+# else touched:
+#   chcon u:object_r:nfc_device:s0 /dev/pn553
+#   setprop ctl.restart vendor.nfc_hal_service
+#     -> INfc/default registered, `svc nfc enable` -> mState=on
+#
+# nfc_device needs no new type or grant: it is AOSP core
+# (system/sepolicy/public/device.te:32) and hal_nfc — the attribute
+# hal_nfc_default carries — already has it at
+# system/sepolicy/public/hal_nfc.te:13:
+#   allow hal_nfc nfc_device:chr_file rw_file_perms;
+# Both verified on lineage-20.0, the branch this tree builds.
+/dev/pn553                                                                      u:object_r:nfc_device:s0
+
+# Modem IPC tty. Stock labels this gsm0710muxd_device
+# (sepolicy_vndr/basic/non_plat/device.te:131 declares the type, and this tree
+# already carries five other nodes under it); ours left it generic `device`.
+# Inert today — vendor.gsm0710muxd is `disabled` with no trigger in our tree or
+# in stock's, so nothing opens it, and the SIM works without it. Carried because
+# the node exists on this hardware and the label is what stock gives it.
+/dev/ttyCMIPC5                                                                  u:object_r:gsm0710muxd_device:s0
+
+# Vendor data stores that stock gives their own types and sepolicy_vndr does
+# not know about at all, so they resolve to generic vendor_data_file and the
+# HAL that owns each one cannot write it. Both were denied on build 61.
+/data/vendor/goodix/gf_data(/.*)?                                               u:object_r:vendor_gf_data_file:s0
+/data/vendor/camera_watermark(/.*)?                                             u:object_r:vendor_watermark_data_file:s0
+
+# Block devices, ALWAYS through /dev/block/by-name — never a partition number.
+# On this hardware sdc62 is tee_b and tranfs is sdc64; a tree that hardcodes the
+# number ends up granting init read/relabel on the TEE partition instead, and
+# fsck's tranfs grant can never match. Numbers also move between firmware
+# revisions. Live map is in notes/device-state-2026-08-03.md.
+/dev/block/by-name/tranfs                                                       u:object_r:tranfs_block_device:s0
+
+# A/B device: the logo partition is SLOTTED, so a label written for the
+# non-slotted /dev/block/by-name/logo matches nothing at all and kpoc_charger's
+# "allow kpoc_charger logo_block_device:blk_file { read open }" can never apply.
+# Measured on hardware: logo_a -> sdc32, logo_b -> sdc54, and no unslotted
+# /dev/block/by-name/logo exists. (device/mediatek/sepolicy_vndr fixed this
+# upstream on its lineage-23.2 branch, where the entry is now
+# "by-name/logo(_[ab])?" — but not on 20.0, which is what this tree targets.)
+/dev/block/by-name/logo_a                                                       u:object_r:logo_block_device:s0
+/dev/block/by-name/logo_b                                                       u:object_r:logo_block_device:s0
