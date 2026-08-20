@@ -27,7 +27,32 @@
 /nvram          emmc    /dev/block/by-name/nvram            flags=display="NVRAM";backup=1;flashimg=1;wipeingui=0
 /proinfo        emmc    /dev/block/by-name/proinfo          flags=display="Proinfo";backup=1;flashimg=1;wipeingui=0
 /external_sd    auto    /dev/block/mmcblk1p1  /dev/block/mmcblk1  flags=display="MicroSD";storage;wipeingui;removable
-/usb_otg        auto    /dev/block/sda1       /dev/block/sda      flags=display="USB-OTG";storage;removable
+# 🔴 sdd, NOT sda. Measured on the device 2026-08-20, in recovery:
+#     sda  8192 sectors (4 MB)     removable=0   UFS boot LUN 0
+#     sdb  8192 sectors (4 MB)     removable=0   UFS boot LUN 1
+#     sdc  500613120    (238 GB)   removable=0   UFS main LUN, all by-name partitions
+# Internal storage on this device is UFS and occupies sda/sdb/sdc, so the OTG
+# entry pointed at a partition of a 4 MB internal boot LUN -- sda1 does not even
+# exist. TWRP found nothing, and the USB-OTG toggle in the Mount menu was inert.
+# That is the reported symptom: "can't even toggle usb-otg on mount section".
+#
+# The old value came from an eMMC-device template, where internal storage is
+# mmcblk0 and the first USB disk is sda. It is wrong on any UFS device.
+#
+# sdd is deterministic HERE, not a second guess: the three UFS LUNs are fixed
+# and enumerate at boot, before any USB device can attach, so the first OTG disk
+# is always the next letter. Confirmed by plugging the stick in:
+#     scsi 1:0:0:0: Direct-Access  SanDisk  Cruzer Blade
+#     sd 1:0:0:0: [sdd] 15232000 512-byte logical blocks: (7.80 GB/7.26 GiB)
+#     sdd: sdd1
+#     sd 1:0:0:0: [sdd] Attached SCSI removable disk
+#
+# The rest of the chain was verified at the same time and needs no changes:
+# the port switches to host (MUSB "a_host", is_host=1) with an ordinary Type-C
+# OTG adapter; the recovery kernel lists exfat in /proc/filesystems; and
+# fsck.exfat/mkexfatfs/exfat-fuse all ship in the ramdisk. Mounting sdd1 by hand
+# gave MOUNT_OK, a successful write, and a clean umount.
+/usb_otg        auto    /dev/block/sdd1       /dev/block/sdd      flags=display="USB-OTG";storage;removable
 
 # --- partitions added 2026-08-19 after operator review of the Advanced Wipe list.
 #
