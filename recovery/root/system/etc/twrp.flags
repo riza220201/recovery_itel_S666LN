@@ -26,7 +26,23 @@
 /mnt/vendor/protect_s  ext4  /dev/block/by-name/protect2    flags=display="Protect_s";backup=1;wipeingui=0
 /nvram          emmc    /dev/block/by-name/nvram            flags=display="NVRAM";backup=1;flashimg=1;wipeingui=0
 /proinfo        emmc    /dev/block/by-name/proinfo          flags=display="Proinfo";backup=1;flashimg=1;wipeingui=0
-/external_sd    auto    /dev/block/mmcblk1p1  /dev/block/mmcblk1  flags=display="MicroSD";storage;wipeingui;removable
+# 🔴 mmcblk0, NOT mmcblk1 -- the same eMMC-template assumption that made the
+# USB-OTG entry point at a 4 MB UFS boot LUN.
+#
+# On an eMMC device internal storage is mmcblk0, so the card is mmcblk1. Internal
+# storage HERE is UFS (sda/sdb/sdc), so nothing occupies mmcblk0 and the card
+# takes it. Measured in recovery 2026-08-20 -- there is exactly ONE MMC host:
+#     /sys/class/mmc_host/mmc0 -> 11240000.mmc      (no mmc1 exists)
+# and 11240000.mmc is the SD slot by the ROM's own reckoning:
+#     fstab.mt6789:57  /devices/platform/soc/11240000.mmc* ...
+#                      voldmanaged=sdcard1:auto,encryptable=userdata
+# One host, unoccupied numbering -> an inserted card registers as mmcblk0 and its
+# first partition as mmcblk0p1. mmcblk1 can never appear on this variant, so the
+# old entry could never mount anything.
+#
+# (fstab.mt6789:58 also lists 11230000.msdc*, but no mmc host exists for it on
+# this variant -- that entry is inert here.)
+/external_sd    auto    /dev/block/mmcblk0p1  /dev/block/mmcblk0  flags=display="MicroSD";storage;wipeingui;removable
 # 🔴 sdd, NOT sda. Measured on the device 2026-08-20, in recovery:
 #     sda  8192 sectors (4 MB)     removable=0   UFS boot LUN 0
 #     sdb  8192 sectors (4 MB)     removable=0   UFS boot LUN 1

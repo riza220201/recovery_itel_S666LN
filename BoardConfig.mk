@@ -224,6 +224,35 @@ TW_DEFAULT_LANGUAGE := en
 # --- storage / misc
 RECOVERY_SDCARD_ON_DATA := true
 TW_INCLUDE_NTFS_3G := true
+
+# Mount exFAT with the KERNEL driver, not FUSE.
+#
+# TWRP prefers exfat-fuse purely because the binary exists: partition.cpp:1597
+#   if (Current_File_System == "exfat" && Path_Exists("/system/bin/exfat-fuse"))
+# and the kernel path at :1690 is guarded by `if (!exfat_mounted ...)`, so it is
+# never reached. Measured on the device 2026-08-20, mounting an OTG stick:
+#   I:cmd: /system/bin/exfat-fuse -o big_writes,max_read=131072,... /dev/block/sdd1 /usb_otg
+#
+# This kernel has exfat natively -- CONFIG_EXFAT_FS=y, and `exfat` is listed in
+# /proc/filesystems on the running recovery -- so the FUSE round-trip buys
+# nothing and costs throughput on every read and write. Installing a 1.6 GB ROM
+# zip from OTG goes through it.
+#
+# The flag removes the binary (Android.mk:606 drops it from TWRP_REQUIRED_MODULES,
+# :789 stops building it) and defines -DTW_NO_EXFAT_FUSE. With the binary gone the
+# Path_Exists test fails, the probe block is skipped, and mount() runs with fstype
+# "exfat". If that fails, :1692 falls back to vfat, so the safety net survives.
+#
+# ⚠ It does NOT remove exFAT support: mkexfatfs and fsck.exfat are gated by
+# TW_NO_EXFAT, which stays unset, so Format and Repair still work.
+#
+# 🔑 What is given up: upstream uses a successful FUSE mount as a PROBE, then
+# unmounts and lets the kernel mount it -- because "some kernels let us mount
+# vfat as exfat which doesn't work out too well" (partition.cpp:1608). Without
+# the binary there is no probe, and detection rests on Check_FS_Type()/blkid.
+# That is the correct trade here: blkid reads the exFAT superblock directly, and
+# this is one known kernel rather than the arbitrary set upstream supports.
+TW_NO_EXFAT_FUSE := true
 TW_INCLUDE_REPACKTOOLS := true
 TW_INCLUDE_RESETPROP := true
 TW_HAS_MTP := true
