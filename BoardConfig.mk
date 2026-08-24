@@ -213,11 +213,28 @@ TW_USE_FSCRYPT_POLICY := 2
 # /data decrypted and mounted (dm-12, 228G). With 2127-12-31 it does not.
 #
 # If the ROM's security patch level ever changes, change it here too.
+#
+# 🔴 2026-08-24: IT CHANGED, AND THIS LINE WAS NOT UPDATED WITH IT. Tier B moved
+# the ROM from 2024-09-05 to 2026-02-01 (build 74). The recovery kept declaring
+# 2024-09-05, so build 74's vold upgraded the metadata key blob to the new patch
+# level -- Android has an upgrade path (system/vold/KeyStorage.cpp,
+# CommitUpgradedKey) -- and PBRP, still reporting the OLD level, was then refused
+# by rollback protection. There is no downgrade path; a recovery BEHIND the ROM
+# can never open the key.
+#
+# Symptom, exactly as this comment predicted: /dev/block/mapper has no userdata
+# entry, "Unable to decrypt metadata encryption", "FBE setup failed. Trying
+# FDE...", 0 MB internal storage, and PBRP reporting the volume unencrypted.
+# /metadata itself mounts fine and ro.crypto.state reads encrypted.
+#
+# ⚠ The recovery's OWN sources are not at 2026-02; this value exists to satisfy
+# KeyMint's key binding, not to advertise a patch level to a user. Keep it equal
+# to the ROM's -- ahead is untested, behind is fatal.
 # [!] PLATFORM_VERSION is NOT set here. version_defaults.mk:130 guards it with
 # `ifndef` and runs BEFORE this file, so an assignment here is silently dead --
 # the built image came out with ro.build.version.release=12. It is exported by
 # tools/build-pbrp.sh instead. The other two below DO work from here.
-PLATFORM_SECURITY_PATCH := 2024-09-05
+PLATFORM_SECURITY_PATCH := 2026-02-01
 VENDOR_SECURITY_PATCH := 2025-04-05
 TW_DEFAULT_LANGUAGE := en
 
