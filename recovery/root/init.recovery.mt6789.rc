@@ -49,6 +49,22 @@ on post-fs
     # BEFORE post-fs, and mcDriverDaemon needs --P1 /mnt/vendor/persist/mcRegistry
     # which the mount directly above provides. Confirmed live: persist is
     # mounted at the main menu, so this trigger does fire.
+    # ADOPT THE INSTALLED ROM'S KEYMINT IDENTITY BEFORE KEYMINT STARTS.
+    #
+    # keymint reads ro.build.version.release, ro.build.version.security_patch and
+    # ro.vendor.build.security_patch ONCE, at its own startup, and binds/checks
+    # key blobs against them. Baking them in at build time pins this recovery to
+    # a single ROM -- which is exactly how it broke on 2026-08-24 when Tier B
+    # moved the ROM's SPL to 2026-02-01 and this image still said 2024-09-05.
+    #
+    # `exec` and not `exec_start`: this MUST complete before keymint starts, and
+    # exec blocks init's action queue while exec_start does not.
+    #
+    # The script is fail-silent by construction -- if the ROM cannot be read it
+    # leaves the compiled-in BoardConfig values alone, so a wiped device still
+    # gets a booting recovery.
+    exec -- /system/bin/sh /system/bin/sync-rom-spl.sh
+
     start mobicore
     start vendor.keymint-trustonic
 
