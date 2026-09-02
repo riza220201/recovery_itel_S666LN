@@ -1,0 +1,49 @@
+diff --git a/partition.cpp b/partition.cpp
+index 84a027d..e44e657 100755
+--- a/partition.cpp
++++ b/partition.cpp
+@@ -2851,6 +2851,44 @@ bool TWPartition::Raw_Read_Write(PartitionSettings *part_settings) {
+ 		return false;
+ 	}
+ 
++	// 🔴 Clear the destination block device's READ-ONLY flag before writing.
++	//
++	// Without this, writing a partition that the kernel has marked read-only
++	// fails inside blkdev_write_iter(), which returns -EPERM -- and the OPEN
++	// above still SUCCEEDS, so the failure surfaces only at the first write() as
++	// "Error writing destination fd (Operation not permitted)". That is exactly
++	// what killed the auto-reflash of PBRP after a ROM install on the itel RS4:
++	// vendor_boot_a (the active slot) wrote fine while vendor_boot_b -- the slot
++	// update_engine had just written as the OTA target, and left read-only --
++	// failed, so the ROM landed on B with the stock recovery still on it.
++	//
++	// This device's PBRP flashable zip has always done exactly this and has
++	// always worked, even immediately after a ROM flash and before a reboot:
++	//     blockdev --setrw $BYNAME/vendor_boot_$s
++	//     dd if=new_vendor_boot.img of=$BYNAME/vendor_boot_$s bs=1M
++	// blockdev(1) is just ioctl(BLKROSET, 0), so do the same thing here rather
++	// than shelling out. Done on a separate O_RDONLY fd, the way blockdev does
++	// it, so it also covers kernels that refuse an O_WRONLY open outright.
++	//
++	// Non-block destinations (a backup file) are skipped, and a failed ioctl is
++	// logged rather than fatal: a device that was already writable does not need
++	// it, and the write below is the real test either way.
++	{
++		struct stat dest_st;
++		if (stat(destfn.c_str(), &dest_st) == 0 && S_ISBLK(dest_st.st_mode)) {
++			int ro_fd = open(destfn.c_str(), O_RDONLY | O_LARGEFILE);
++			if (ro_fd >= 0) {
++				int set_ro = 0;
++				if (ioctl(ro_fd, BLKROSET, &set_ro) == 0)
++					LOGINFO("Cleared read-only flag on '%s'\n", destfn.c_str());
++				else
++					LOGINFO("BLKROSET on '%s' failed (%s); write may still fail if it is read-only\n",
++						destfn.c_str(), strerror(errno));
++				close(ro_fd);
++			}
++		}
++	}
++
+ 	dest_fd = open(destfn.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_LARGEFILE, S_IRUSR | S_IWUSR);
+ 	if (dest_fd < 0) {
+ 		gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(destfn.c_str())(strerror(errno)));

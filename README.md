@@ -31,13 +31,35 @@ tools/package-pbrp.sh <recovery.cpio.lz4> <out.zip>
 `ALLOW_MISSING_DEPENDENCIES=true` is **mandatory** — the minimal manifest drops
 826 of 1061 projects and the survivors still reference them.
 
-### 🔴 Three patches are NOT in the build tree — re-apply after every `repo sync`
+### 🔴 FIVE patches are NOT in the build tree — re-apply after every `repo sync`
 
 ```
 patches/0001-default-timezone-WIB.patch           bootable/recovery/data.cpp
 patches/0002-platform-version-13.patch            build/make/core/version_defaults.mk
 patches/0003-create-fscrypt-session-keyring.patch system/vold/KeyUtil.cpp
+patches/0004-pbrp-ui-cleanup-and-repack-control.patch  gui/, bootable/recovery/twrpRepacker.cpp
+patches/0005-blkroset-before-raw-write.patch      bootable/recovery/partition.cpp
 ```
+
+**0005 is what makes "Automatically Reflash PBRP after flashing a ROM" work.**
+Without it that feature writes ONE slot and silently fails on the other. TWRP's
+`Raw_Read_Write` opens the destination successfully and then `write()` returns
+**EPERM**, because `blkdev_write_iter()` refuses a block device the kernel has
+marked read-only. After an A/B ROM install the OTA's TARGET slot is left in
+exactly that state, so the reflash wrote `vendor_boot_a` and failed on
+`vendor_boot_b` — leaving the ROM on B with the stock recovery on it. Measured
+on hardware 2026-09-03:
+
+```
+1782  write vendor_boot_a -> ok
+1785  Overriding slot to 'B'
+1839  write vendor_boot_b -> Error writing destination fd (Operation not permitted)
+```
+
+The fix is one `ioctl(BLKROSET, 0)` before the write — exactly what this device's
+own flashable zip has always done (`blockdev --setrw`, `tools/update-binary:109`),
+which is why the zip works even immediately after a ROM flash and the built-in
+did not.
 
 **0003 is what makes FBE work.** Losing it silently returns you to "encrypted
 with FBE" and ciphertext filenames. `installKey()` calls
