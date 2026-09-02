@@ -30,7 +30,31 @@ TARGET_USES_64_BIT_BINDER := true
 
 TARGET_BOARD_PLATFORM := mt6789
 TARGET_NO_BOOTLOADER := true
-TARGET_OTA_ASSERT_DEVICE := S666LN
+# The device names this recovery will accept a ROM zip for.
+#
+# 🔴 THIS IS A PREREQUISITE FOR THE ROM'S IDENTITY CHANGE, not cosmetics.
+# twrpinstall/installcommand.cpp:145-169 requires the zip's META-INF metadata
+# `pre-device` to equal ONE OF the recovery's own ro.product.device /
+# ro.product.model / ro.product.name, or an entry in ro.twrp.target.devices --
+# which twrp.cpp:401 sets from this variable. Anything else is INSTALL_ERROR
+# "Package is for product X but expected Y".
+#
+# In recovery those three read S666LN / "itel RS4" / omni_S666LN, and they are
+# the RECOVERY's identity: changing the ROM's does not change them. And the ROM's
+# pre-device is generated from the ROM's ro.product.device
+# (build/make/tools/releasetools/common.py:433), which is exactly the property
+# the planned identity fix moves to `itel-S666LN`. So a ROM built with the new
+# identity would be REFUSED by a recovery that only accepts S666LN.
+#
+# The matcher splits on a delimiter CHARACTER SET ("[,|]" passed to
+# android::base::Split, so comma and pipe both separate), hence a list works.
+# S666LN keeps every existing zip installable; the other two cover the identity
+# change whichever field it ends up driving.
+#
+# ⚠ This only protects users who update their recovery FIRST. Anyone still on an
+# older PBRP is unaffected by this line, so the ROM side should ALSO pin
+# `ota_override_device` to S666LN so pre-device never moves at all.
+TARGET_OTA_ASSERT_DEVICE := S666LN,itel-S666LN,S666LN-OP
 
 # --- kernel. The ROM ships a vanilla 5.10.260 built from itel-rs4-kernel and
 # imported as a prebuilt; recovery uses the SAME Image.gz. Do not substitute the
