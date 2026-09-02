@@ -64,6 +64,29 @@ on init
     mkdir /dev/usb-ffs/mtp 0770 shell shell
     mkdir /config/usb_gadget/g1/functions/ffs.mtp
     mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=2000,gid=2000,no_disconnect=1
+
+    # fastbootd endpoints. ONE LINE, and without it fastbootd is completely dead.
+    #
+    # TWRP's init.rc creates ffs.fastboot only inside
+    #     on fs && property:sys.usb.configfs=1
+    # but configfs is not set to 1 until `on boot` below, which runs AFTER
+    # `on fs` -- so that block never executes and the function never exists.
+    # A functionfs instance can only be mounted once its configfs function is
+    # there, so init.rc's own `mount functionfs fastboot` then fails ENODEV and
+    # everything downstream cascades: no ep0, so fastbootd cannot open it, so it
+    # never reaches usb_client.cpp:218 where it would setprop sys.usb.ffs.ready 1,
+    # so init.rc's fastboot trigger never fires and the gadget is left with no
+    # function bound. Symptom: entering fastbootd kills USB entirely.
+    #
+    # MEASURED IN RECOVERY 2026-09-02, before the fix:
+    #     /config/usb_gadget/g1/functions/  ->  ffs.adb  ffs.mtp     (no ffs.fastboot)
+    #     /dev/usb-ffs/fastboot/            ->  EMPTY                (no ep0)
+    #     /dev/usb-ffs/adb/ and mtp/        ->  ep0 ep1 ep2          (control: mounted)
+    #
+    # Creating it HERE works because `on init` runs before init.rc's `on fs`,
+    # so init.rc's existing mkdir+mount of /dev/usb-ffs/fastboot then succeeds
+    # and no mount line is duplicated in this file.
+    mkdir /config/usb_gadget/g1/functions/ffs.fastboot
     setprop sys.usb.controller "musb-hdrc"
 
 on boot
