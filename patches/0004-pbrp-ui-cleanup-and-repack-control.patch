@@ -1,0 +1,227 @@
+diff --git a/gui/theme/common/languages/en.xml b/gui/theme/common/languages/en.xml
+index ee55314..bc8f93b 100644
+--- a/gui/theme/common/languages/en.xml
++++ b/gui/theme/common/languages/en.xml
+@@ -326,7 +326,7 @@
+ 		<string name="settings_gen_s_hdr">General</string>
+ 		<string name="settings_gen_btn">General</string>
+ 		<string name="use_rmrf_chk">Use rm -rf instead of formatting</string>
+-		<string name="auto_reflashtwrp_chk">Automatically Reflash TWRP after flashing a ROM</string>
++		<string name="auto_reflashtwrp_chk">Automatically Reflash PBRP after flashing a ROM</string>
+ 		<string name="use24clock_chk">Use 24-hour clock</string>
+ 		<string name="rev_navbar_chk">Reversed navbar layout</string>
+ 		<string name="simact_chk">Simulate actions for theme testing</string>
+diff --git a/gui/theme/common/portrait.xml b/gui/theme/common/portrait.xml
+index 46749fe..ef7d1a1 100644
+--- a/gui/theme/common/portrait.xml
++++ b/gui/theme/common/portrait.xml
+@@ -737,7 +737,7 @@
+                			<listitem name="{@zip_sig_chk=Zip signature verification}">
+ 					<data variable="tw_signed_zip_verify"/>
+ 				</listitem>
+-				<listitem name="{@auto_reflashtwrp_chk=Automatically Reflash TWRP after flashing a ROM}">
++				<listitem name="{@auto_reflashtwrp_chk=Automatically Reflash PBRP after flashing a ROM}">
+ 					<conditions>
+ 						<condition var1="tw_has_boot_slots" var2="1"/>
+ 						<condition var1="tw_is_vendor_boot_header_v3" var2="0"/>
+@@ -747,10 +747,6 @@
+ 				<listitem name="{@install_reboot_chk=Reboot after installation is complete}">
+ 					<data variable="tw_install_reboot"/>
+ 				</listitem>
+-				<listitem name="{@inject_twrp_chk=Flash PBRP after install}">
+-					<condition var1="tw_has_injecttwrp" var2="1"/>
+-					<data variable="tw_inject_after_flash"/>
+-				</listitem>
+ 				<listitem name="{@pb_enable_logging=Copy Logs After Flash}">
+ 					<data variable="pb_include_logs_after_flash"/>
+ 				</listitem>
+@@ -4179,7 +4175,7 @@
+ 				<listitem name="{@use_aromafm=Use Aroma File Manager}">
+ 					<data variable="aromafm"/>
+ 				</listitem>
+-				<listitem name="{@auto_reflashtwrp_chk=Automatically Reflash TWRP after flashing a ROM}">
++				<listitem name="{@auto_reflashtwrp_chk=Automatically Reflash PBRP after flashing a ROM}">
+ 					<conditions>
+ 						<condition var1="tw_has_boot_slots" var2="1"/>
+ 						<condition var1="tw_is_vendor_boot_header_v3" var2="0"/>
+diff --git a/gui/theme/portrait_hdpi/extras.xml b/gui/theme/portrait_hdpi/extras.xml
+index a2f4de8..af3cbaa 100644
+--- a/gui/theme/portrait_hdpi/extras.xml
++++ b/gui/theme/portrait_hdpi/extras.xml
+@@ -72,58 +72,6 @@
+ 			</text>
+ 			<button style="main_button_tools">
+ 				<placement x="56" y="324" textplacementmain="3"/>
+-				<icon resource="magisk"/>
+-				<text>{@Magisk_btn=Magisk}</text>
+-				<actions>
+-					<action function="set">tw_back=tools</action>
+-					<action function="set">tw_filename=/sdcard/PBRP/tools/magisk.zip</action>
+-					<action function="set">tw_action=queuezip</action>
+-					<action function="set">_install_built_in_zip=1</action>
+-					<action function="set">tw_has_action2=1</action>
+-					<action function="set">tw_action2=flash</action>
+-					<action function="set">tw_action2_param=flash_zip</action>
+-					<action function="set">tw_text1={@Magisk_text=Magisk will be installed.}</action>
+-					<action function="set">tw_text2={@Magisk_confirm=Try to install it?}</action>
+-					<action function="set">tw_slider_text={@swipe_to_confirm=Swipe to Confirm}</action>
+-					<action function="page">confirm_action</action>
+-				</actions>
+-			</button>
+-			<button style="main_button_tools">
+-				<placement x="56" y="489" textplacementmain="3"/>
+-				<icon resource="magisk"/>
+-				<text>{@Unroot_Magisk_btn=Unroot Magisk}</text>
+-				<actions>
+-					<action function="set">tw_back=tools</action>
+-					<action function="set">tw_filename=/sdcard/PBRP/tools/unrootmagisk.zip</action>
+-					<action function="set">tw_action=queuezip</action>
+-					<action function="set">tw_has_action2=1</action>
+-					<action function="set">tw_action2=flash</action>
+-					<action function="set">tw_action2_param=flash_zip</action>
+-					<action function="set">tw_text1={@Unroot_Magisk_text=Unroot Magisk will be installed.}</action>
+-					<action function="set">tw_text2={@Unroot_Magisk_confirm=Try to install it?}</action>
+-					<action function="set">tw_slider_text={@swipe_to_confirm=Swipe to Confirm}</action>
+-					<action function="page">confirm_action</action>
+-				</actions>
+-			</button>
+-			<button style="main_button_tools">
+-				<placement x="56" y="654" textplacementmain="3"/>
+-				<icon resource="magisk"/>
+-				<text>{@MMR_btn=Magisk Manager}</text>
+-				<actions>
+-					<action function="set">tw_back=tools</action>
+-					<action function="set">tw_filename=/sdcard/PBRP/tools/magiskmanagerrecovery.zip</action>
+-					<action function="set">tw_action=queuezip</action>
+-					<action function="set">tw_has_action2=1</action>
+-					<action function="set">tw_action2=flash</action>
+-					<action function="set">tw_action2_param=flash_zip</action>
+-					<action function="set">tw_text1={@MMR_text=Magisk Manager Recovery will be installed.}</action>
+-					<action function="set">tw_text2={@MMR_confirm=Try to install it?}</action>
+-					<action function="set">tw_slider_text={@swipe_to_confirm=Swipe to Confirm}</action>
+-					<action function="page">confirm_action</action>
+-				</actions>
+-			</button>
+-			<button style="main_button_tools">
+-				<placement x="56" y="819" textplacementmain="3"/>
+ 				<icon resource="mtp"/>
+ 				<text>{@MTP_Fix_btn=MTP Fix}</text>
+ 				<actions>
+@@ -140,7 +88,7 @@
+ 				</actions>
+ 			</button>
+ 			<button style="main_button_tools">
+-				<placement x="56" y="984" textplacementmain="3"/>
++				<placement x="56" y="489" textplacementmain="3"/>
+ 				<icon resource="overlays"/>
+ 				<text>{@RM_All_Subs_Overlays_btn=RM All Overlays}</text>
+ 				<actions>
+@@ -157,7 +105,7 @@
+ 				</actions>
+ 			</button>
+ 			<button style="main_button_tools">
+-				<placement x="56" y="1149" textplacementmain="3"/>
++				<placement x="56" y="654" textplacementmain="3"/>
+ 				<icon resource="overlays"/>
+ 				<text>{@RM_Subs_Overlays_btn=RM Overlays}</text>
+ 				<actions>
+diff --git a/twrpRepacker.cpp b/twrpRepacker.cpp
+index 28a2a6c..f99c093 100644
+--- a/twrpRepacker.cpp
++++ b/twrpRepacker.cpp
+@@ -119,6 +119,73 @@ static bool is_AB_for_repacker() {
+ 	return !slot.empty();
+ }
+ 
++
++// --- Post-repack control, ported from this device's PBRP flashable-zip installer.
++//
++// vendor_boot v4 carries TWO ramdisk fragments and only the recovery one is ours.
++// The PLATFORM fragment holds the kernel modules and the touch firmware, and PBRP's
++// own platform fragment is FOUR BYTES -- so an image that loses it boots to a touch
++// UI with no touch input. A partition write is not the place to discover that the
++// repack went wrong, which is why the zip installer verifies before it writes.
++//
++// Deliberately a PRESENCE-AND-SIZE check rather than a hash compare. magiskboot may
++// recompress a fragment during repack -- Flash_Current_Twrp() hands it a freshly
++// gzip'd ramdisk while the image's own fragments are lz4 -- so byte identity is NOT
++// guaranteed on a CORRECT repack, and asserting it would false-fail a working
++// feature. Size cannot lie about the failure that actually matters: compression
++// never turns megabytes into four bytes.
++static bool VerifyRepackedVendorBoot(const std::string& repack_dir, const std::string& ramdisk_cpio) {
++	const std::string verify_dir = repack_dir + "verify/";
++	const unsigned long kMinFragment = 1000000UL;
++
++	TWFunc::Exec_Cmd("rm -rf " + verify_dir, false);
++	if (TWFunc::Exec_Cmd("mkdir -p " + verify_dir, false) != 0) {
++		LOGERR("repack control: cannot create %s\n", verify_dir.c_str());
++		return false;
++	}
++	if (TWFunc::Exec_Cmd("cp -f " + repack_dir + "new-boot.img " + verify_dir, false) != 0) {
++		LOGERR("repack control: cannot stage new-boot.img for verification\n");
++		return false;
++	}
++	if (TWFunc::Exec_Cmd("cd " + verify_dir + " && /system/bin/magiskboot unpack -n new-boot.img", false) != 0) {
++		LOGERR("repack control: the repacked image does not unpack -- refusing to flash it\n");
++		TWFunc::Exec_Cmd("rm -rf " + verify_dir, false);
++		return false;
++	}
++
++	// magiskboot 28+ writes vendor_ramdisk/<name>.cpio; older writes
++	// vendor_ramdisk_<name>.cpio, the platform one having the empty name.
++	unsigned long rec = TWFunc::Get_File_Size(verify_dir + ramdisk_cpio);
++	if (rec == 0)
++		rec = TWFunc::Get_File_Size(verify_dir + "vendor_ramdisk/recovery.cpio");
++
++	unsigned long plat = TWFunc::Get_File_Size(verify_dir + "vendor_ramdisk_.cpio");
++	if (plat == 0)
++		plat = TWFunc::Get_File_Size(verify_dir + "vendor_ramdisk/.cpio");
++	unsigned long orig_plat = TWFunc::Get_File_Size(repack_dir + "vendor_ramdisk_.cpio");
++	if (orig_plat == 0)
++		orig_plat = TWFunc::Get_File_Size(repack_dir + "vendor_ramdisk/.cpio");
++
++	TWFunc::Exec_Cmd("rm -rf " + verify_dir, false);
++
++	LOGINFO("repack control: recovery fragment %lu B, platform fragment %lu B (was %lu B)\n",
++		rec, plat, orig_plat);
++
++	if (rec < kMinFragment) {
++		LOGERR("repack control FAILED: recovery fragment is %lu B -- refusing to flash\n", rec);
++		return false;
++	}
++	// Only assert the platform fragment when the image being repacked HAD one:
++	// a plain /boot repack legitimately has none.
++	if (orig_plat >= kMinFragment && plat < kMinFragment) {
++		LOGERR("repack control FAILED: platform fragment went from %lu B to %lu B -- "
++		       "touch firmware would be lost, refusing to flash\n", orig_plat, plat);
++		return false;
++	}
++	LOGINFO("repack control OK (recovery replaced, platform fragment intact)\n");
++	return true;
++}
++
+ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const struct Repack_Options_struct& Repack_Options) {
+ 	if (!TWFunc::Path_Exists("/system/bin/magiskboot")) {
+ 		LOGERR("Image repacking tool not present in this TWRP build!");
+@@ -236,6 +303,10 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
+ 	}
+ 
+ 	DataManager::SetProgress(.75);
++	if (!VerifyRepackedVendorBoot(path, ramdisk_cpio)) {
++		gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
++		return false;
++	}
+ 	std::string file = "new-boot.img";
+ 	DataManager::SetValue("tw_flash_partition", dest_partition + ";");
+ 	if (!PartitionManager.Flash_Image(path, file)) {
+@@ -281,6 +352,10 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
+ 				return false;
+ 			}
+ 			DataManager::SetProgress(.75);
++			if (!VerifyRepackedVendorBoot(path, ramdisk_cpio)) {
++				gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
++				return false;
++			}
+ 			std::string file = "new-boot.img";
+ 			DataManager::SetValue("tw_flash_partition", dest_partition + ";");
+ 			if (!PartitionManager.Flash_Image(path, file)) {
