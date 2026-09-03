@@ -4,15 +4,27 @@ PitchBlack Recovery Project (PBRP 3.7.1, Android 13) for the **itel RS4
 (S666LN)** — MediaTek MT6789 (Helio G99), A/B, Virtual A/B, FBE + metadata
 encryption.
 
-Boots, decrypts `/data` **completely** — metadata *and* FBE — and brings up MTP
-and adb together from boot. Verified on hardware:
+Boots, decrypts `/data` **completely** — metadata *and* FBE, with **or without**
+a screen lock — and brings up MTP and adb together from boot. Verified on
+hardware:
 
 ```
 /data on /dev/block/dm-12 f2fs · /data/media/0 lists Alarms Android Audiobooks DCIM
     in PLAINTEXT, not ciphertext
+no screen lock   default-password path      -> decrypts at boot
+PIN / pattern /  gatekeeper + secdis path   -> wrong PIN rejected,
+  password                                     right PIN decrypts
 UDC=musb-hdrc  state=mtp,adb  f1->ffs.mtp  f2->ffs.adb
-mcDriverDaemon · keymint · keystore2 · boot-hal all registered
+mcDriverDaemon · keymint · keystore2 · gatekeeper · boot-hal all registered
 ```
+
+🔴 **The credential path was broken in every build up to and including
+3.7.1_13 (03/09/2026), and it failed as a silent HANG** on `Attempting to
+decrypt FBE for user 0...`. Gatekeeper was declared in the VINTF manifest and
+started by nothing, so TWRP's blocking `getService()` never returned. Anyone
+without a screen lock never saw it — which is why it survived every test this
+tree records. See `BLOBS-boot-hal.md` for the full account; the short version is
+that it cost two blobs, one property and one mount flag.
 
 This tree is authored for this device from its own measurements. It is not a
 fork of an existing recovery tree; every fstab entry, offset and flag was derived
@@ -148,6 +160,19 @@ Decryption flags derive from the ROM fstab's own userdata line
 * **`stop adbd` kills the service cgroup**, including anything spawned from an
   adb shell; `setsid` does not save it. Loggers for USB tests must not live under
   adbd.
+* **A HAL declared in the VINTF manifest and started by nobody is worse than an
+  absent one.** TWRP uses the *blocking* `getService()`, so a declaration with no
+  registrant turns a missing feature into an unbounded wait with no error text —
+  hwservicemanager just retries `ctl.interface_start` once a second forever. This
+  has now cost two hangs from the same cause: `IBootControl` (splash screen) and
+  `IGatekeeper` (credential decrypt, shipped publicly). Grep the manifest against
+  the `service` blocks in `recovery/root/*.rc` before shipping.
+* **Test the configuration the feature is FOR, not the one you happen to run.**
+  The developer's phone has no screen lock, so every decrypt measurement ever
+  recorded here took `Decrypt_Device("!")` and the entire gatekeeper path — the
+  one every ordinary user takes — was never once executed. `/data/system_de/0/
+  spblob/` not existing is the one-command check for "this device has never had
+  a credential", and therefore for "these results say nothing about users".
 * **keystore2 dereferences `getDeviceHalManifest()` without a null check**, so a
   device VINTF manifest that is missing *or unparseable* SIGSEGVs it in a Binder
   thread. The manifest must also be meta-version **4.0** — PBRP's libvintf is

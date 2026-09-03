@@ -27,12 +27,28 @@
 # the recipe alone.
 
 on post-fs
-    # persist is a plain physical partition; mount it early and read-only.
-    # Read-only is deliberate: recovery has no business writing the secure
-    # storage area, and metadata decryption was verified working with it ro.
+    # persist is a plain physical partition; mount it early.
+    #
+    # [!] READ-WRITE, and that is not a relaxation -- it is load-bearing.
+    # This said `ro` until 2026-09-03, reasoning "recovery has no business
+    # writing the secure storage area, and metadata decryption was verified
+    # working with it ro". Both halves were true and the conclusion was still
+    # wrong, because the test only ever covered METADATA decryption. CREDENTIAL
+    # decryption writes here: the Trustonic gatekeeper TA keeps its throttling
+    # record in /mnt/vendor/persist/mcRegistry/failure_records.dat -- the path
+    # is a literal string in libMcGatekeeper.so -- and with the mount ro,
+    # verify() fails for EVERY password including the correct one. TWRP shows
+    # only "Begin Operation failed", from the keystore call AFTER the failed
+    # verify, so the message names the wrong layer.
+    #
+    # Measured on hardware 2026-09-03, both directions:
+    #   ro : PIN 1234 (right) and 9999 (wrong) fail IDENTICALLY
+    #   rw : 1234 -> "User 0 Decrypted Successfully", 9999 -> rejected,
+    #        and failure_records.dat's mtime moves
+    # Android mounts this rw as well, so this is matching it, not loosening it.
     wait /dev/block/by-name/persist 5
     mkdir /mnt/vendor/persist 0771 root root
-    mount ext4 /dev/block/by-name/persist /mnt/vendor/persist ro nosuid nodev noatime
+    mount ext4 /dev/block/by-name/persist /mnt/vendor/persist rw nosuid nodev noatime
     # [!] START THEM HERE, EXPLICITLY. `class main` is NOT enough: recovery's
     # init never issues class_start, so a class-only service is never started
     # at all. Verified on the device -- `grep -rn class_start /init.rc
@@ -63,10 +79,57 @@ on post-fs
     # The script is fail-silent by construction -- if the ROM cannot be read it
     # leaves the compiled-in BoardConfig values alone, so a wiped device still
     # gets a booting recovery.
+    # [!] DIAGNOSTIC, 2026-09-03 -- these two `write` lines are here to answer a
+    # question, not to change behaviour. MEASURED on the shipped 3.7.1_13 image,
+    # on two separate fresh boots: this exec has NO EFFECT. `ro.rs4.spl_sync` --
+    # which the script sets unconditionally as its last act -- is EMPTY at the
+    # TWRP main menu, and /tmp/sync-rom-spl.log does not exist. Run by hand from
+    # adb the same script works perfectly and sets both. So the KeyMint identity
+    # adoption this file's comment block above describes has never once run.
+    #
+    # What is ruled out already:
+    #   /tmp not mounted yet   NO -- init.rc mounts it in `on init`, line 47,
+    #                          and post-fs is triggered from `on late-init`
+    #   the block never fires  NO -- persist IS mounted and mobicore/keymint ARE
+    #                          started, and both are commands in THIS block
+    #                          BELOW this line
+    #   init logged a failure  NO -- init reports failing commands with file and
+    #                          line (see /init.recovery.usb.rc:99 in dmesg) and
+    #                          says nothing whatever about this one
+    #   TWRP wiping /tmp       NO -- no recursive delete of /tmp anywhere in
+    #                          bootable/recovery
+    #
+    # It is currently HARMLESS only by coincidence: the values baked into
+    # prop.default happen to equal the installed ROM's, so `adopt` would report
+    # "already" for all three. It stops being harmless the moment the ROM's SPL
+    # moves -- which is the exact 2026-08-24 breakage the script was written for.
+    #
+    # These writes land in dmesg, so ONE boot of the next image distinguishes
+    # "init never reached the line" from "the exec ran and the script died", and
+    # neither can fail in a way that matters. Delete them once it is answered.
+    # This is BLUEPRINT.md section 9's rule applied to a silent zero: print a
+    # sanity mark first, so an absence is provably an absence.
+    write /dev/kmsg "RS4: post-fs reached sync-rom-spl exec"
     exec -- /system/bin/sh /system/bin/sync-rom-spl.sh
+    write /dev/kmsg "RS4: sync-rom-spl exec returned"
 
     start mobicore
     start vendor.keymint-trustonic
+
+    # [!] ro.hardware.gatekeeper LIVES IN /vendor/build.prop, AND /vendor IS
+    # NEVER MOUNTED HERE (see the manifest note in vendor/etc/vintf/manifest.xml
+    # for why it cannot be). So the property is EMPTY in recovery, and
+    # libhardware's hw_get_module("gatekeeper") falls through its whole chain --
+    # ro.hardware.gatekeeper, then ro.hardware (mt6789), then ro.product.board,
+    # ro.board.platform, ro.arch, then "default" -- and none of
+    # gatekeeper.mt6789.so / gatekeeper.default.so exist in this ramdisk.
+    # Measured: with the two blobs staged but this line absent, the service
+    # prints "Unable to open GateKeeper HAL" and takes SIGABRT.
+    #
+    # Stated here, not read off the installed ROM, because which TEE this device
+    # has is a hardware fact -- and it must agree with the impl we ship.
+    setprop ro.hardware.gatekeeper trustonic
+    start vendor.gatekeeper-1-0
 
 service mobicore /system/bin/mcDriverDaemon --sfs-reformat --P1 /mnt/vendor/persist/mcRegistry \
 	-r /vendor/app/mcRegistry/020f0000000000000000000000000000.drbin \
@@ -96,30 +159,61 @@ service vendor.keymint-trustonic /system/bin/hw/android.hardware.security.keymin
     user root
     seclabel u:r:recovery:s0
 
-# [!] GATEKEEPER IS DELIBERATELY NOT STARTED, and its binary is left in place
-# only so this note has something to point at.
+# GATEKEEPER -- required to decrypt /data whenever a screen lock IS set.
 #
-# android.hardware.gatekeeper@1.0-service is a passthrough shim. It dlopens an
-# implementation and dies without one:
-#     E LegacySupport: Could not get passthrough implementation for
-#       android.hardware.gatekeeper@1.0::IGatekeeper/default
-#     init: Service 'vendor.gatekeeper-1-0' exited with status 1
-# and init then restarts it forever.
+# [!] THIS WAS DELIBERATELY NOT STARTED UNTIL 2026-09-03, AND THAT SHIPPED A
+# HANG TO USERS. The note here used to say it "buys nothing: gatekeeper
+# authenticates a lockscreen credential, and this device has no screen lock, so
+# TWRP takes the default-password path (Decrypt_Device("!")) which never calls
+# it." Every word of that was true of the DEVELOPER'S phone, which has no
+# credential, and false for everyone else's. A user with a PIN/pattern/password
+# reported the recovery stuck on "Attempting to decrypt FBE for user 0..."
+# forever, and that is precisely this path:
 #
-# The chain is impl.so -> gatekeeper.trustonic.so (a symlink to
-# libMcGatekeeper.so) -> libgatekeeper.so + libhardware.so. The last two are
-# NOT in the stock vendor blob set -- they are platform libraries from /system,
-# which recovery does not mount. Shipping gatekeeper therefore means importing
-# a chain of system libs.
+#   Decrypt_User -> Decrypt_User_Synth_Pass -> no .weaver file, so the secdis
+#     branch -> IGatekeeper::getService()        system/vold/Decrypt.cpp:753
 #
-# It buys nothing here: gatekeeper authenticates a lockscreen credential, and
-# this device has no screen lock, so TWRP takes the default-password path
-# (Decrypt_Device("!")) which never calls it. Metadata decryption does not use
-# it either -- proven on the device, where the metadata key unwrapped correctly
-# with only mobicore and keymint running.
+# getService() is the BLOCKING variant, and the interface IS declared in our
+# vendor/etc/vintf/manifest.xml, so hwservicemanager keeps trying to lazy-start
+# a service that no init file defines -- once a second, forever:
+#   init: Control message: Could not find
+#     'android.hardware.gatekeeper@1.0::IGatekeeper/default' for
+#     ctl.interface_start from pid: 305 (/system/bin/hwservicemanager)
+# TWRP displays no error because there is none: nothing failed, a call simply
+# never returned. Same mechanism as the IBootControl hang in BLOBS-boot-hal.md.
+# A HAL DECLARED in the manifest and registered by nobody is strictly worse
+# than one that is absent, because the declaration is what makes the wait legal.
 #
-# If a PIN is ever set, revisit: import the impl plus libgatekeeper.so and
-# libhardware.so, and restore `start vendor.gatekeeper-1-0` above.
+# [!] The old note also claimed shipping this "means importing a chain of system
+# libs" -- libgatekeeper.so and libhardware.so, "NOT in the stock vendor blob
+# set". That was measured wrong. Both are ALREADY in the shipped recovery
+# ramdisk, built by PBRP itself, along with android.hardware.gatekeeper@1.0.so,
+# libhidlbase, libutils and libc++; libMcClient.so is already carried for
+# keymint. The real cost is TWO files, 35,760 bytes total:
+#     system/lib64/hw/android.hardware.gatekeeper@1.0-impl.so   passthrough shim
+#     system/lib64/hw/gatekeeper.trustonic.so                   = libMcGatekeeper.so
+# Both from this device's own revision-28 vendor dump. That estimate is what
+# justified deferring the work, so it is worth naming: the cost was overstated
+# by an entire dependency chain that was already present, and nobody looked.
+#
+# [!] Shipped as a COPY named gatekeeper.trustonic.so, where stock uses a
+# symlink to libMcGatekeeper.so. hw_get_module() dlopens it by that filename, so
+# the copy is equivalent, and it removes a symlink that would otherwise have to
+# survive the wholesale copy of recovery/root into the ramdisk. 19,800 bytes.
+#
+# The trustlet needs nothing new: all 28 of stock's mcRegistry files are already
+# in this ramdisk, so tlTeeGatekeeper (TA version 100.258) loads as-is.
+#
+# Verified on hardware 2026-09-03, on the shipped 3.7.1_13 image, from a fresh
+# boot, with the wrong password as a control:
+#     9999 (wrong)  -> rejected, "Failed to decrypt user 0"
+#     1234 (right)  -> "User 0 Decrypted Successfully", and /data/media/0 lists
+#                      Alarms Android Audiobooks DCIM in PLAINTEXT
+service vendor.gatekeeper-1-0 /system/bin/hw/android.hardware.gatekeeper@1.0-service
+    interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    class main
+    user root
+    seclabel u:r:recovery:s0
 
 # [!] The previous version gated all three of these on
 #     on property:twrp.vendor.mounted=1
