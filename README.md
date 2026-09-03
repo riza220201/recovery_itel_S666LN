@@ -101,11 +101,32 @@ adb sideload PitchBlack-S666LN-3.7.1_13-<date>.zip
 ```
 
 The `.img` is repacked against a host-side donor and therefore pins the platform
-fragment to that donor's. If you use it:
+fragment to that donor's — so it can go stale, and it has: the donor in use for
+one release was three ROM builds out of date. It exists for the one case the zip
+cannot serve, a device whose PBRP has already been replaced by a ROM's own
+recovery and must be recovered over fastboot.
 
 ```sh
 fastboot flash vendor_boot --slot=all PitchBlack-S666LN-3.7.1_13-<date>.img
 ```
+
+Build it with `tools/repack-img.py`, never by hand:
+
+```sh
+# DONOR = vendor_boot.img from the LATEST ROM build's own *-signed-images.zip.
+# Not a previous PBRP .img, and not a dump off the device.
+unzip -j crDroidAndroid-13.0-<date>-S666LN-*-signed-images.zip vendor_boot.img
+tools/repack-img.py vendor_boot.img <recovery-fragment.lz4> out.img
+# then run the avbtool command it prints (footer is Algorithm NONE, so the
+# salt and fingerprint are read off the donor rather than hardcoded)
+```
+
+It **self-tests before writing anything**: it repacks the donor with the donor's
+own recovery fragment and refuses to continue unless that reproduces the donor
+byte for byte, AVB footer included. It also rejects a donor whose platform
+fragment is implausibly small, which is the "PBRP's own platform fragment is
+four bytes" mistake in another costume — flash that and you get a touch UI with
+no touch input.
 
 ⚠ `vendor_boot` is where recovery lives on this device (recovery-as-boot, GKI).
 There is no `recovery` partition.
@@ -125,7 +146,8 @@ sepolicy/               vendor + private policy
 patches/                the three tree patches above
 prebuilt/               Image.gz, dtb.img, dtbo.img
 recovery/root/…         stock blobs — see BLOBS-boot-hal.md for why each is here
-tools/                  build, package, and the installer's update-binary
+tools/                  build, package, repack-img, and the installer's
+                        update-binary
 ```
 
 Two fstab facts that came from checking the device rather than copying the ROM's
