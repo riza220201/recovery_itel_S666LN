@@ -49,7 +49,7 @@
 # Recovery has a short uptime and few /dev/kmsg writers, so the cost is a few
 # hundred extra lines per boot. Verified writable at runtime on hardware.
 on early-init
-    write /proc/sys/kernel/printk_devkmsg on
+    write /proc/sys/kernel/printk_devkmsg on\n
 
 on post-fs
     # persist is a plain physical partition; mount it early.
@@ -151,7 +151,7 @@ on post-fs
     # job and are gone. They worked where init's own logger did not for a reason
     # worth keeping: the `write` builtin opens /dev/kmsg fresh each time, and the
     # rate limit is per open file description.
-    exec u:r:recovery:s0 root root -- /system/bin/sh /system/bin/sync-rom-spl.sh
+    exec u:r:recovery:s0 root root -- /system/bin/sh /system/bin/sync-rom-spl.sh early
 
     start mobicore
     start vendor.keymint-trustonic
@@ -170,6 +170,65 @@ on post-fs
     # has is a hardware fact -- and it must agree with the impl we ship.
     setprop ro.hardware.gatekeeper trustonic
     start vendor.gatekeeper-1-0
+
+# [!] THE SECOND HALF OF THE SPL SYNC, AND IT EXISTS BECAUSE ONE PASS CANNOT
+# WORK. Measured on hardware 2026-09-04, on the first boot where the exec above
+# ever ran at all:
+#     t=2.390  the `early` exec
+#     t=2.645  mcDriverDaemon · 2.647 keymint · 2.649 gatekeeper
+#     t=2.78   /system/bin/recovery maps and mounts the logical partitions
+# The ROM lives on LOGICAL partitions and NOTHING maps them until TWRP does, so
+# at post-fs there is nothing to read -- the log said `no device for system`.
+# And it cannot be fixed by moving the exec later: `exec` blocks init's command
+# queue, and the process that creates those nodes is started by init AFTER it,
+# so a script that waited would deadlock the boot.
+#
+# So `late` reads the truth once TWRP has mapped the partitions and CACHES it on
+# persist, and `early` adopts that cache next boot at a point where persist -- a
+# physical partition, mounted rw two lines above the exec -- is readable and the
+# ROM is not. Steady state is correct before keymint. Only the first boot after
+# the ROM's SPL moves is not, and the restart below repairs that one in place.
+#
+# `start`, NOT `exec_start`. Both `exec` and `exec_start` go through
+# Service::ExecStart() and set is_exec_service_running_, which blocks init's
+# whole command queue (service.cpp:400, init.cpp:1002) -- so `exec_start` here
+# would stall TWRP's own startup for as long as this waits. A plain `start`
+# blocks nothing, which is why the script may wait for its device nodes.
+#
+# TRIGGER: twrp.super.symlinks_created is set by TWPartitionManager::
+# Prepare_Super_Volume (partitionmanager.cpp:4202), called from Process_Fstab
+# (:378). Decrypt_Data() is :587 and runs after, so this fires before any
+# decrypt attempt. ⚠ It is set on the FIRST symlink created, not the last, which
+# is why the script waits for the two nodes it actually needs.
+#
+# ⚠ THIS TRIGGER FIRES REPEATEDLY -- measured 6 times on one boot, t=2.845 to
+# t=2.888, because TWRP sets the property once per super symlink it creates and
+# init re-runs an action on every set. That is harmless twice over: `start` on a
+# running service is a no-op (the service ran exactly ONCE, pid 351, 0.547 s,
+# and all six firings landed inside that window), and a re-run would be
+# idempotent anyway -- it would re-read the same values, adopt nothing because
+# they are already set, and rewrite an identical cache. Recorded so the repeats
+# are not later mistaken for a defect.
+on property:twrp.super.symlinks_created=true
+    start rs4-spl-late
+
+# [!] RESTART KEYMINT ONLY IF A VALUE ACTUALLY MOVED. keymint reads the three
+# properties ONCE at its own startup, so a value adopted after it started is not
+# in effect until it restarts. But a restart lands in the middle of TWRP's
+# startup, so it must not happen on a normal boot -- and it does not: the script
+# sets this property only when an adopt changed something, which is only after
+# the ROM's SPL has moved. Worst case if the race is lost anyway: one decrypt
+# attempt fails and a retry succeeds, and the next boot needs no restart at all
+# because `early` will have the cache.
+on property:rs4.spl_changed=1
+    restart vendor.keymint-trustonic
+
+service rs4-spl-late /system/bin/sh /system/bin/sync-rom-spl.sh late
+    disabled
+    oneshot
+    user root
+    group root
+    seclabel u:r:recovery:s0
 
 service mobicore /system/bin/mcDriverDaemon --sfs-reformat --P1 /mnt/vendor/persist/mcRegistry \
 	-r /vendor/app/mcRegistry/020f0000000000000000000000000000.drbin \
