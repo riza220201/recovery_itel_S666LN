@@ -26,6 +26,31 @@
 # mounted before mcDriverDaemon starts. That requirement is easy to miss from
 # the recipe alone.
 
+# [!] LET init BE HEARD. Added 2026-09-04, and it is a DIAGNOSTIC line, not a
+# functional one -- but it is the reason a real defect in this file survived a
+# full session of investigation, so it earns its place.
+#
+# /proc/sys/kernel/printk_devkmsg defaults to `ratelimit`, which the kernel
+# applies PER OPEN FILE DESCRIPTION at 10 lines per 5 seconds. init holds one
+# such description for its entire log. It spends the budget the moment second
+# stage starts -- the ten lines ending "Couldn't load property file
+# /system_ext/default.prop" -- and is then silent from t=2.16 to t=7.46. `on
+# post-fs` runs at t=2.44, squarely inside that window, so every "processing
+# action" line and every failed command with its file:line is dropped by the
+# kernel before it reaches the ring buffer. `dmesg | grep` then reports a clean
+# run of a block that failed. The boot log says so out loud if you look for it:
+#     printk: init: 396 output lines suppressed due to ratelimiting
+#
+# That is BLUEPRINT.md section 9's "an empty variable makes every grep return 0,
+# which reads as a clean pass", with the KERNEL doing the emptying rather than a
+# shell. The absence of a log line is not evidence about init until the log is
+# known to be lossless.
+#
+# Recovery has a short uptime and few /dev/kmsg writers, so the cost is a few
+# hundred extra lines per boot. Verified writable at runtime on hardware.
+on early-init
+    write /proc/sys/kernel/printk_devkmsg on
+
 on post-fs
     # persist is a plain physical partition; mount it early.
     #
@@ -79,39 +104,54 @@ on post-fs
     # The script is fail-silent by construction -- if the ROM cannot be read it
     # leaves the compiled-in BoardConfig values alone, so a wiped device still
     # gets a booting recovery.
-    # [!] DIAGNOSTIC, 2026-09-03 -- these two `write` lines are here to answer a
-    # question, not to change behaviour. MEASURED on the shipped 3.7.1_13 image,
-    # on two separate fresh boots: this exec has NO EFFECT. `ro.rs4.spl_sync` --
-    # which the script sets unconditionally as its last act -- is EMPTY at the
-    # TWRP main menu, and /tmp/sync-rom-spl.log does not exist. Run by hand from
-    # adb the same script works perfectly and sets both. So the KeyMint identity
-    # adoption this file's comment block above describes has never once run.
+    # [!] THIS EXEC NEVER RAN, ON ANY BUILD EVER SHIPPED, UNTIL 2026-09-04, AND
+    # THE MISSING PIECE IS THE `u:r:recovery:s0` ON THE LINE ITSELF. It read
+    #     exec -- /system/bin/sh /system/bin/sync-rom-spl.sh
+    # with no seclabel, which makes init derive the child's domain for itself:
+    #   service.cpp:829   a seclabel is only read when an argument PRECEDES `--`,
+    #                     so `exec --` leaves seclabel_ empty
+    #   service.cpp:583   an empty seclabel means ComputeContextFromExecutable(),
+    #                     i.e. security_compute_create(u:r:init:s0, <sh>, process)
+    #   init.te:17        domain_trans(init, rootfs,     recovery)
+    #   init.te:22        domain_trans(init, shell_exec, shell)
+    # Both of those are `domain_trans`, NOT `domain_auto_trans`. The macro pair at
+    # te_macros:9-33 differs by exactly one line: domain_auto_trans adds the
+    # `type_transition`, domain_trans does not. So no automatic transition exists
+    # for either label, security_compute_create hands back init's OWN context,
+    # service.cpp:90 calls that "incorrect label or no domain transition", and
+    # under enforcing it returns an error instead of forking.
     #
-    # What is ruled out already:
-    #   /tmp not mounted yet   NO -- init.rc mounts it in `on init`, line 47,
-    #                          and post-fs is triggered from `on late-init`
-    #   the block never fires  NO -- persist IS mounted and mobicore/keymint ARE
-    #                          started, and both are commands in THIS block
-    #                          BELOW this line
-    #   init logged a failure  NO -- init reports failing commands with file and
-    #                          line (see /init.recovery.usb.rc:99 in dmesg) and
-    #                          says nothing whatever about this one
-    #   TWRP wiping /tmp       NO -- no recursive delete of /tmp anywhere in
-    #                          bootable/recovery
+    # Reproduced and measured in this recovery, 2026-09-04:
+    #   getenforce                Enforcing
+    #   /proc/1/attr/current      u:r:init:s0
+    #   ls -Z /system/bin/sh      u:object_r:rootfs:s0
+    #                             ^ the ramdisk cpio carries no xattrs, so EVERY
+    #                               file here is rootfs -- not the shell_exec that
+    #                               plat_file_contexts:459 declares for this path.
+    #                               Read the label off the running device; the
+    #                               file_contexts entry is not what applies here.
+    #   getprop ro.rs4.spl_sync   empty
     #
-    # It is currently HARMLESS only by coincidence: the values baked into
-    # prop.default happen to equal the installed ROM's, so `adopt` would report
-    # "already" for all three. It stops being harmless the moment the ROM's SPL
-    # moves -- which is the exact 2026-08-24 breakage the script was written for.
+    # `u:r:recovery:s0` is not a hopeful choice. It is the domain every other
+    # service in this file already uses, init.te:17 gives it `entrypoint` on
+    # exactly `rootfs`, and mcDriverDaemon enters it from /system/bin/mcDriverDaemon
+    # -- same label, same init, two commands below this one -- on every boot
+    # (pid 313, measured). Both halves were then proven on hardware: the script
+    # re-run under `runcon u:r:recovery:s0` mounted system_b and vendor_b, read all
+    # three properties, set ro.rs4.spl_sync=2026-02-01 and exited 0.
     #
-    # These writes land in dmesg, so ONE boot of the next image distinguishes
-    # "init never reached the line" from "the exec ran and the script died", and
-    # neither can fail in a way that matters. Delete them once it is answered.
-    # This is BLUEPRINT.md section 9's rule applied to a silent zero: print a
-    # sanity mark first, so an absence is provably an absence.
-    write /dev/kmsg "RS4: post-fs reached sync-rom-spl exec"
-    exec -- /system/bin/sh /system/bin/sync-rom-spl.sh
-    write /dev/kmsg "RS4: sync-rom-spl exec returned"
+    # 🪤 THE EARLIER INVESTIGATION RULED THIS OUT WITH "init logged no failure",
+    # AND THAT WAS THE INSTRUMENT TALKING. init does log it -- action.cpp:170
+    # reports every failed command with its file:line -- but at LOG(INFO) through
+    # /dev/kmsg, which the kernel rate-limits. See the `on early-init` block above
+    # for the whole mechanism; the short version is that init is silent from
+    # t=2.16 to t=7.46, and `on post-fs` runs at t=2.44.
+    #
+    # The two `write /dev/kmsg` probes that bracketed this line have done their
+    # job and are gone. They worked where init's own logger did not for a reason
+    # worth keeping: the `write` builtin opens /dev/kmsg fresh each time, and the
+    # rate limit is per open file description.
+    exec u:r:recovery:s0 root root -- /system/bin/sh /system/bin/sync-rom-spl.sh
 
     start mobicore
     start vendor.keymint-trustonic
