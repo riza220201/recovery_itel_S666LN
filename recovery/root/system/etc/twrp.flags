@@ -14,7 +14,11 @@
 /data           f2fs    /dev/block/by-name/userdata         flags=display="Data";backup=1;wipeingui
 /metadata       ext4    /dev/block/by-name/metadata         flags=display="Metadata";backup=1
 /boot           emmc    /dev/block/by-name/boot             flags=display="Boot";slotselect;backup=1;flashimg=1
-/init_boot      emmc    /dev/block/by-name/init_boot        flags=display="Init Boot";slotselect;backup=1;flashimg=1
+# [!] There is NO /init_boot entry, and there must not be. See the note in
+# recovery.fstab: both slots read as 8 MiB of zeros and stock rev 28 ships no
+# init_boot.img (scatter: is_download false, file_name NONE). It was listed here
+# until 2026-09-07 and showed up as a phantom "Init Boot" in Backup and, worse,
+# as a target in Flash Image.
 /vendor_boot    emmc    /dev/block/by-name/vendor_boot      flags=display="Vendor Boot";slotselect;backup=1;flashimg=1
 /dtbo           emmc    /dev/block/by-name/dtbo             flags=display="Dtbo";slotselect;backup=1;flashimg=1
 /md1img         emmc    /dev/block/by-name/md1img           flags=display="Modem";slotselect;backup=1;flashimg=1
@@ -89,3 +93,99 @@
 # frp DOES exist on this device: /dev/block/by-name/frp -> /dev/block/sdc6, 1 MiB.
 # It was simply never listed, which is why it did not appear in the GUI.
 /frp            emmc    /dev/block/by-name/frp              flags=display="FRP";backup=1;flashimg=1;wipeingui=0
+
+# --- partitions added 2026-09-07, after a field report that the Backup list was
+# missing partitions that exist and offering one that does not.
+#
+# Every entry below was decided by MEASURING the partition, not by reading the
+# GPT: a by-name node proves a partition EXISTS, never that anything WROTE it.
+# On this device four GPT entries are permanently empty -- 8/8/8/14 MiB read off
+# them hashes equal to the same length of /dev/zero:
+#     init_boot_a/_b   connsys_bt_a   connsys_wifi_a   connsys_gnss_a   otp
+# (the connsys firmware lives in /vendor/firmware here, not in its partitions),
+# and stock rev 28 declares every one of them `is_download: false, NONE`. None
+# of them is listed. A backup of zeros is worse than no entry: it takes space
+# and it makes a restore look complete.
+#
+# The two groups below are different in kind and that is why they are separated.
+#
+# 1. DEVICE-UNIQUE, and NOT in the firmware -- these cannot be re-obtained from
+#    the stock zip, so they are the ones a backup exists for. The scatter marks
+#    them `is_download: false` precisely because they are per-unit data:
+#      dram_para  DRAM calibration     seccfg  lock state + rollback
+#      sec1       secure ro area       tkv     key/trust store
+#    (nvdata/nvcfg/nvram/persist/protect1/protect2/proinfo are already above.)
+#
+# 2. FIRMWARE, recoverable from ~/itel-RS4-S666LN-28 -- cheap to carry (~55 MB
+#    total) and what makes the list read as complete to a user comparing it to
+#    the scatter. `lk` is the bootloader: back it up, but note it is NOT given
+#    flashimg -- writing LK from a recovery GUI is brick territory (BLUEPRINT
+#    section 12), and the recovery path for a bad LK is Penumbra + BROM, which
+#    a phone that will not boot cannot reach.
+#
+# vbmeta/vbmeta_system/vbmeta_vendor get flashimg as well as backup: they are
+# the images users are most often told to flash (verity/verification flags),
+# they are 8 MiB each, and a mismatched one is a no-boot that a stock-vbmeta
+# reflash fixes in seconds.
+/vbmeta         emmc    /dev/block/by-name/vbmeta           flags=display="Vbmeta";slotselect;backup=1;flashimg=1;wipeingui=0
+/vbmeta_system  emmc    /dev/block/by-name/vbmeta_system    flags=display="Vbmeta_system";slotselect;backup=1;flashimg=1;wipeingui=0
+/vbmeta_vendor  emmc    /dev/block/by-name/vbmeta_vendor    flags=display="Vbmeta_vendor";slotselect;backup=1;flashimg=1;wipeingui=0
+/dram_para      emmc    /dev/block/by-name/dram_para        flags=display="DRAM para";backup=1;wipeingui=0
+/seccfg         emmc    /dev/block/by-name/seccfg           flags=display="Seccfg";backup=1;wipeingui=0
+/sec1           emmc    /dev/block/by-name/sec1             flags=display="Sec1";backup=1;wipeingui=0
+/tkv            emmc    /dev/block/by-name/tkv              flags=display="TKV";slotselect;backup=1;wipeingui=0
+/efuse          emmc    /dev/block/by-name/efuse            flags=display="Efuse";backup=1;wipeingui=0
+/flashinfo      emmc    /dev/block/by-name/flashinfo        flags=display="Flashinfo";backup=1;wipeingui=0
+/lk             emmc    /dev/block/by-name/lk               flags=display="LK (bootloader)";slotselect;backup=1;wipeingui=0
+/tee            emmc    /dev/block/by-name/tee              flags=display="TEE";slotselect;backup=1;wipeingui=0
+/gz             emmc    /dev/block/by-name/gz               flags=display="GZ";slotselect;backup=1;wipeingui=0
+/scp            emmc    /dev/block/by-name/scp              flags=display="SCP";slotselect;backup=1;wipeingui=0
+/sspm           emmc    /dev/block/by-name/sspm             flags=display="SSPM";slotselect;backup=1;wipeingui=0
+/spmfw          emmc    /dev/block/by-name/spmfw            flags=display="SPMFW";slotselect;backup=1;wipeingui=0
+/mcupm          emmc    /dev/block/by-name/mcupm            flags=display="MCUPM";slotselect;backup=1;wipeingui=0
+/dpm            emmc    /dev/block/by-name/dpm              flags=display="DPM";slotselect;backup=1;wipeingui=0
+/pi_img         emmc    /dev/block/by-name/pi_img           flags=display="PI img";slotselect;backup=1;wipeingui=0
+#
+# NOT listed, on purpose:
+#   expdb      134 MiB of crash-dump ring buffer. Nothing to restore.
+#   misc/para/boot_para   the bootloader control block. Restoring a STALE BCB
+#              is not neutral -- it is an instruction to the bootloader.
+#   otp, connsys_*, init_boot   measured empty, see above.
+
+# --- Flash Image targets for the LOGICAL partitions, added 2026-09-07 on
+# operator request: "those partitions are exposed on shell but not on the UI,
+# which is tedious to use".
+#
+# TWRP will not flash a raw image to a partition it has set up as a FILE SYSTEM
+# -- partition.cpp:3371 `if (Backup_Method == BM_FILES) "Cannot flash images to
+# file systems"` -- so `flashimg=1` on the /vendor line above would put the
+# entry in the menu and then refuse at the swipe. The mechanism TWRP does
+# provide is a SECOND entry for the same block device declared as an image:
+# fs type `emmc` -> Is_Image() -> Setup_Image() -> BM_DD -> Raw_Read_Write.
+# `/system_image` and `/vendor_image` are names partition.cpp:605-614 already
+# knows; the other four follow the same pattern.
+#
+# These are twrp.flags-only entries with no recovery.fstab line, which works
+# because Process_Fstab "adds any items from twrp.flags that did not exist in
+# the recovery.fstab" -- and Setup_Super_Devices() runs BEFORE that loop, so
+# /dev/block/mapper/* already exists when they are resolved.
+#
+# Verified on hardware 2026-09-07, in recovery: all twelve mapper nodes are
+# mapped READ-WRITE (blockdev --getro = 0) on both slots, so no RO flag has to
+# be cleared first -- and patch 0005 covers the case where one is not.
+#     system_a 521,125,888   vendor_a 752,861,184   product_a  601,976,832
+#     system_ext_a 207,294,464   vendor_dlkm_a 37,150,720   odm_dlkm_a 348,160
+#
+# ⚠ Those sizes are the CURRENT extent, and Flash_Image refuses an image larger
+# than it ("Size of image is larger than target device"). That is correct: a raw
+# write cannot grow a logical partition, only lpmake/update_engine can. An image
+# taken from a build of this same ROM fits; one from a different ROM may not.
+#
+# backup is deliberately off: the Super entry already backs these up, and a
+# second, raw, 521 MB "System Image" in the same list is a trap, not a feature.
+/system_image      emmc /dev/block/mapper/system      flags=display="System Image";slotselect;flashimg=1;backup=0;wipeingui=0
+/system_ext_image  emmc /dev/block/mapper/system_ext  flags=display="System_ext Image";slotselect;flashimg=1;backup=0;wipeingui=0
+/vendor_image      emmc /dev/block/mapper/vendor      flags=display="Vendor Image";slotselect;flashimg=1;backup=0;wipeingui=0
+/product_image     emmc /dev/block/mapper/product     flags=display="Product Image";slotselect;flashimg=1;backup=0;wipeingui=0
+/vendor_dlkm_image emmc /dev/block/mapper/vendor_dlkm flags=display="Vendor_dlkm Image";slotselect;flashimg=1;backup=0;wipeingui=0
+/odm_dlkm_image    emmc /dev/block/mapper/odm_dlkm    flags=display="Odm_dlkm Image";slotselect;flashimg=1;backup=0;wipeingui=0

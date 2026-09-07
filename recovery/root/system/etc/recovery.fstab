@@ -29,8 +29,16 @@ odm_dlkm                           /odm_dlkm              ext4    ro            
 /dev/block/by-name/protect2        /mnt/vendor/protect_s  ext4    noatime,nosuid,nodev               wait
 /dev/block/by-name/tranfs          /tranfs                ext4    noatime,nosuid,nodev               wait
 
+# [!] init_boot is NOT listed, and its absence is deliberate. init_boot_a/_b DO exist
+# in the GPT (8 MiB each, sdc35/sdc57) but they are EMPTY: 8 MiB read off both slots
+# hashes equal to 8 MiB of /dev/zero, and the stock rev 28 scatter declares them
+#   init_boot_a  is_download: false  file_name: NONE
+# with no init_boot.img anywhere in the firmware. This device's ramdisk is in
+# boot.img; init_boot is a GPT entry the SoC template carries and nothing writes.
+# Listing it put a phantom "Init Boot" in Backup AND in Flash Image, where it was
+# offered as a flash target that can only ever brick expectations. Measured
+# 2026-09-07 on hardware and against ~/itel-RS4-S666LN-28.
 /dev/block/by-name/boot            /boot                  emmc    defaults                           defaults,slotselect
-/dev/block/by-name/init_boot       /init_boot             emmc    defaults                           defaults,slotselect
 /dev/block/by-name/vendor_boot     /vendor_boot           emmc    defaults                           defaults,slotselect
 /dev/block/by-name/dtbo            /dtbo                  emmc    defaults                           defaults,slotselect
 /dev/block/by-name/vbmeta          /vbmeta                emmc    defaults                           defaults,slotselect

@@ -1,0 +1,45 @@
+# "Reboot System" after an install reboots to RECOVERY.
+#
+# tw_reboot_param is the variable the reboot actually happens on:
+#   rebootcheck -> appcheck -> <action function="reboot">%tw_reboot_param%</action>
+# and twrp.cpp:349 maps that string to rb_recovery / rb_poweroff / ... with
+# rb_system as the fall-through. tw_action_param is a DIFFERENT variable, used
+# only by the confirm_action ("No OS Installed! Are you sure?") page.
+#
+# Every button on the reboot page sets tw_reboot_param to its own target --
+# recovery, poweroff, bootloader, download, edl, fastboot -- and reboot_
+# recovery_routine sets it too. reboot_system_routine sets tw_action_param
+# and NOT tw_reboot_param, and it is the page BOTH the reboot page's "System"
+# button and the auto-reboot after an install go through. Measured in the
+# SHIPPED theme (/twres/portrait.xml on the device, 2026-09-07):
+#
+#   reboot_system_routine    :1150 tw_action=reboot
+#                            :1151 tw_action_param=system
+#                                  <-- no tw_reboot_param
+#   reboot_recovery_routine  :1168 tw_action=reboot
+#                            :1169 tw_action_param=recovery
+#                            :1170 tw_reboot_param=recovery
+#
+# So nothing in the theme ever puts tw_reboot_param BACK to system -- the one
+# place that sets it to system at all is the fastbootd reboot listbox at :3600.
+# The variable is session state (SetValue with persist=0), so it starts empty,
+# which is why a first pass through works: an empty arg falls through to
+# rb_system. Once anything in the session has set it -- selecting Reboot ->
+# Recovery and backing out of the swipe page is enough, no reboot required --
+# every later "System" reboot silently uses the stale target instead.
+#
+# Reported as: with "Reboot after installation is complete" on, flashing
+# anything reboots to recovery instead of system.
+#
+# The fix is to make the page named reboot_system_routine actually say system.
+diff --git a/gui/theme/common/portrait.xml b/gui/theme/common/portrait.xml
+--- a/gui/theme/common/portrait.xml
++++ b/gui/theme/common/portrait.xml
+@@ -1149,6 +1149,7 @@
+ 			<action>
+ 				<action function="set">tw_action=reboot</action>
+ 				<action function="set">tw_action_param=system</action>
++				<action function="set">tw_reboot_param=system</action>
+ 				<action function="set">tw_has_action2=0</action>
+ 				<action function="set">tw_text1={@no_os1=No OS Installed! Are you}</action>
+ 				<action function="set">tw_text2={@no_osrb=sure you wish to reboot?}</action>
