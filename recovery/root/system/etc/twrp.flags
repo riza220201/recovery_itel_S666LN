@@ -130,21 +130,55 @@
 /vbmeta         emmc    /dev/block/by-name/vbmeta           flags=display="Vbmeta";slotselect;backup=1;flashimg=1;wipeingui=0
 /vbmeta_system  emmc    /dev/block/by-name/vbmeta_system    flags=display="Vbmeta_system";slotselect;backup=1;flashimg=1;wipeingui=0
 /vbmeta_vendor  emmc    /dev/block/by-name/vbmeta_vendor    flags=display="Vbmeta_vendor";slotselect;backup=1;flashimg=1;wipeingui=0
-/dram_para      emmc    /dev/block/by-name/dram_para        flags=display="DRAM para";backup=1;wipeingui=0
-/seccfg         emmc    /dev/block/by-name/seccfg           flags=display="Seccfg";backup=1;wipeingui=0
-/sec1           emmc    /dev/block/by-name/sec1             flags=display="Sec1";backup=1;wipeingui=0
-/tkv            emmc    /dev/block/by-name/tkv              flags=display="TKV";slotselect;backup=1;wipeingui=0
-/efuse          emmc    /dev/block/by-name/efuse            flags=display="Efuse";backup=1;wipeingui=0
-/flashinfo      emmc    /dev/block/by-name/flashinfo        flags=display="Flashinfo";backup=1;wipeingui=0
-/lk             emmc    /dev/block/by-name/lk               flags=display="LK (bootloader)";slotselect;backup=1;wipeingui=0
-/tee            emmc    /dev/block/by-name/tee              flags=display="TEE";slotselect;backup=1;wipeingui=0
-/gz             emmc    /dev/block/by-name/gz               flags=display="GZ";slotselect;backup=1;wipeingui=0
-/scp            emmc    /dev/block/by-name/scp              flags=display="SCP";slotselect;backup=1;wipeingui=0
-/sspm           emmc    /dev/block/by-name/sspm             flags=display="SSPM";slotselect;backup=1;wipeingui=0
-/spmfw          emmc    /dev/block/by-name/spmfw            flags=display="SPMFW";slotselect;backup=1;wipeingui=0
-/mcupm          emmc    /dev/block/by-name/mcupm            flags=display="MCUPM";slotselect;backup=1;wipeingui=0
-/dpm            emmc    /dev/block/by-name/dpm              flags=display="DPM";slotselect;backup=1;wipeingui=0
-/pi_img         emmc    /dev/block/by-name/pi_img           flags=display="PI img";slotselect;backup=1;wipeingui=0
+/dram_para      emmc    /dev/block/by-name/dram_para        flags=display="DRAM para";backup=1;flashimg=1;wipeingui=0
+/seccfg         emmc    /dev/block/by-name/seccfg           flags=display="Seccfg";backup=1;flashimg=1;wipeingui=0
+/sec1           emmc    /dev/block/by-name/sec1             flags=display="Sec1";backup=1;flashimg=1;wipeingui=0
+/tkv            emmc    /dev/block/by-name/tkv              flags=display="TKV";slotselect;backup=1;flashimg=1;wipeingui=0
+/efuse          emmc    /dev/block/by-name/efuse            flags=display="Efuse";backup=1;flashimg=1;wipeingui=0
+/flashinfo      emmc    /dev/block/by-name/flashinfo        flags=display="Flashinfo";backup=1;flashimg=1;wipeingui=0
+/lk             emmc    /dev/block/by-name/lk               flags=display="LK (bootloader)";slotselect;backup=1;flashimg=1;wipeingui=0
+/tee            emmc    /dev/block/by-name/tee              flags=display="TEE";slotselect;backup=1;flashimg=1;wipeingui=0
+/gz             emmc    /dev/block/by-name/gz               flags=display="GZ";slotselect;backup=1;flashimg=1;wipeingui=0
+/scp            emmc    /dev/block/by-name/scp              flags=display="SCP";slotselect;backup=1;flashimg=1;wipeingui=0
+/sspm           emmc    /dev/block/by-name/sspm             flags=display="SSPM";slotselect;backup=1;flashimg=1;wipeingui=0
+/spmfw          emmc    /dev/block/by-name/spmfw            flags=display="SPMFW";slotselect;backup=1;flashimg=1;wipeingui=0
+/mcupm          emmc    /dev/block/by-name/mcupm            flags=display="MCUPM";slotselect;backup=1;flashimg=1;wipeingui=0
+/dpm            emmc    /dev/block/by-name/dpm              flags=display="DPM";slotselect;backup=1;flashimg=1;wipeingui=0
+/pi_img         emmc    /dev/block/by-name/pi_img           flags=display="PI img";slotselect;backup=1;flashimg=1;wipeingui=0
+#
+# ⚠ flashimg=1 on every one of the above is deliberate, on operator instruction
+# 2026-09-07: "the overclocking community flashed their mcupm partition in order
+# to increase the frequency clock, which means they need easy access to flash
+# into it -- make everything visible in backup/restore flashable too."
+# Corroborated: CPU_OC_MT6789_EMIKO_V2.zip writes a 129,376-byte mcupm_signed.img
+# (exactly stock mcupm.img's size) to by-name/mcupm_a AND mcupm_b.
+#
+# 🔴 Two things a user of this menu has to know, because the UI cannot say them:
+#   1. Flash Image writes the ACTIVE SLOT ONLY. The OC zip writes both on
+#      purpose -- an OTA that switches slots lands on an un-overclocked mcupm.
+#      Flashing here is a per-slot action; do it again after a slot switch.
+#   2. `lk` is the BOOTLOADER and `efuse`/`seccfg`/`sec1` are security state.
+#      A bad write to lk is not a bootloop, it is a BROM-only device -- the way
+#      back is Penumbra + DAMT6789.bin (BLUEPRINT section 12), which needs a PC.
+#      They are listed because the operator asked for parity between the two
+#      menus, not because flashing them is routine.
+
+# --- raw-image twins for the ext4 device-data partitions, same 2026-09-07 ask.
+# These carry the IMEI and radio calibration, and the reason to want a RAW
+# target for them is exactly the reason they are backed up: restoring a dump
+# after an nvdata loss. They cannot take flashimg on their own line -- they are
+# set up as file systems, and partition.cpp:3371 refuses an image for those --
+# so they get the same *_image twin the logical partitions use below.
+/nvdata_image    emmc /dev/block/by-name/nvdata    flags=display="NVDATA Image";flashimg=1;backup=0;wipeingui=0
+/nvcfg_image     emmc /dev/block/by-name/nvcfg     flags=display="NVCFG Image";flashimg=1;backup=0;wipeingui=0
+/persist_image   emmc /dev/block/by-name/persist   flags=display="Persist Image";flashimg=1;backup=0;wipeingui=0
+/protect_f_image emmc /dev/block/by-name/protect1  flags=display="Protect_f Image";flashimg=1;backup=0;wipeingui=0
+/protect_s_image emmc /dev/block/by-name/protect2  flags=display="Protect_s Image";flashimg=1;backup=0;wipeingui=0
+/tranfs_image    emmc /dev/block/by-name/tranfs    flags=display="Tranfs Image";flashimg=1;backup=0;wipeingui=0
+#
+# /data and /metadata get NO image twin. /data is 244 GB, and a raw /metadata
+# restore puts back an encryption state that no longer matches /data -- that is
+# not a restore, it is a wipe with extra steps.
 #
 # NOT listed, on purpose:
 #   expdb      134 MiB of crash-dump ring buffer. Nothing to restore.
