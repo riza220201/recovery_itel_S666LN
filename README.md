@@ -43,7 +43,7 @@ tools/package-pbrp.sh <recovery.cpio.lz4> <out.zip>
 `ALLOW_MISSING_DEPENDENCIES=true` is **mandatory** — the minimal manifest drops
 826 of 1061 projects and the survivors still reference them.
 
-### 🔴 FIVE patches are NOT in the build tree — re-apply after every `repo sync`
+### 🔴 SEVEN patches are NOT in the build tree — re-apply after every `repo sync`
 
 ```
 patches/0001-default-timezone-WIB.patch           bootable/recovery/data.cpp
@@ -51,7 +51,24 @@ patches/0002-platform-version-13.patch            build/make/core/version_defaul
 patches/0003-create-fscrypt-session-keyring.patch system/vold/KeyUtil.cpp
 patches/0004-pbrp-ui-cleanup-and-repack-control.patch  gui/, bootable/recovery/twrpRepacker.cpp
 patches/0005-blkroset-before-raw-write.patch      bootable/recovery/partition.cpp
+patches/0006-reboot-param-system.patch            gui/theme/common/portrait.xml
+patches/0007-partition-list-duplicates-and-names.patch
+                                                  bootable/recovery/partition.cpp,
+                                                  bootable/recovery/partitionmanager.cpp
 ```
+
+**0006 is why "Reboot System" after an install lands in system.** The reboot
+happens on `tw_reboot_param`, not `tw_action_param`, and the shipped theme's
+`reboot_system_routine` set only the latter — so once anything in the session
+had set `tw_reboot_param` (selecting Reboot -> Recovery and backing out is
+enough), every later "System" reboot used the stale target.
+
+**0007 is why the Backup and Flash Image lists read like one phone.** Without
+it, five `/mnt/vendor/*` partitions appear TWICE — `Find_Partition_By_Path()`
+truncates a nested mount point to `/mnt` before looking it up, so the
+"add what the fstab lacked" pass never sees them — and `display=` never
+reaches either menu, because both render `Backup_Display_Name` and the v2
+merge path sets only `Display_Name`.
 
 **0005 is what makes "Automatically Reflash PBRP after flashing a ROM" work.**
 Without it that feature writes ONE slot and silently fails on the other. TWRP's
