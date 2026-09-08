@@ -296,6 +296,69 @@ TW_INCLUDE_NTFS_3G := true
 TW_NO_EXFAT_FUSE := true
 TW_INCLUDE_REPACKTOOLS := true
 TW_INCLUDE_RESETPROP := true
+
+# --- the liblp partition tools. Needed to FLASH A PORTED ROM, nothing less.
+#
+# A port-ROM installer cannot use the ROM's own logical partition sizes: the
+# donor's system/vendor/product are a different shape, and a raw write can
+# never grow a logical partition (Flash_Image refuses an image larger than the
+# current extent, and it is right to -- only lpmake or update_engine can move
+# an extent). What every port installer for this class of device does instead is
+# rewrite the super METADATA from the recovery shell:
+#
+#     lptools clear-cow
+#     lptools unmap system$SLOT && lptools remove system$SLOT      (x6)
+#     lptools create system$SLOT <donor size>                      (x6)
+#     lptools map system$SLOT                                      (x6)
+#     <decompress the donor image straight onto /dev/block/mapper/system$SLOT>
+#
+# 🔴 IT WAS NEVER A BUILD PROBLEM -- THE BINARIES WERE BEING BUILT ALL ALONG AND
+#    INSTALLED WHERE THIS PRODUCT THROWS THEM AWAY. Measured 2026-09-08 in the
+#    build tree:
+#      out/target/product/S666LN/system/bin/lptools          EXISTS
+#      out/target/product/S666LN/system/bin/lpdump           EXISTS
+#      out/target/product/S666LN/recovery/root/system/bin/   NEITHER
+#    bootable/recovery/Android.mk:187-195 already adds lpdump and lptools to
+#    TWRP_REQUIRED_MODULES whenever PRODUCT_USE_DYNAMIC_PARTITIONS is true (it
+#    is, omni_S666LN.mk:31), which is why they COMPILED. But required-module
+#    resolution installs the ordinary device variant into $(TARGET_OUT)/bin --
+#    the system image, which this product never builds and never ships. Only
+#    bootable/recovery/prebuilt/Android.mk copies a binary into the recovery
+#    ramdisk, and its lp* block (:317-337) is gated on THIS flag.
+#
+# What the flag brings in, all of it relinked against the libs already in the
+# ramdisk (liblp, libfs_mgr, libsparse, libbase, libcutils, libutils,
+# libhidlbase and android.hardware.boot@1.1 are all present -- checked in the
+# shipped fragment before setting this):
+#     lptools                    create/remove/resize/replace/map/unmap/free/
+#                                unlimited-group/clear-cow  -- the one that matters
+#     lpdump lpdumpd bootctl     read the metadata back, and the slot
+#     lpmake lpadd lpflash lpunpack   the rest of the family, for completeness
+#
+# ⚠ Two things a port installer on THIS device has to know, neither of which
+#   the tools can tell you:
+#   1. Our ROM declares BOARD_MTK_DYNAMIC_PARTITIONS_SIZE := 4 GiB
+#      (device_itel_S666LN/BoardConfig.mk:397), so the group ceiling on a
+#      device running our ROM is 4 GiB, not the ~9.16 GiB the super can hold.
+#      A donor set larger than that needs `lptools unlimited-group` FIRST or
+#      `lptools create` fails with "Not enough space to resize partition".
+#   2. `lptools clear-cow` deletes the Virtual A/B snapshot partitions. Do it
+#      only with no update pending -- upstream guards this with the boot HAL's
+#      merge status, and that guard is compiled out of lptools_static (we ship
+#      the dynamic one, which keeps it, but the HAL has to be up to answer).
+TW_ENABLE_ALL_PARTITION_TOOLS := true
+
+# 🔴 …and one library the flag itself gets wrong on a tree this old. PBRP's
+# prebuilt/Android.mk:330 relinks `liblpdump_interface-V1-cpp.so`, the name
+# AOSP gave that AIDL interface AFTER versioning went in. Here it is still
+#     out/target/product/S666LN/system/lib64/liblpdump_interface-cpp.so
+# so the -V1 line copies nothing, silently, and lpdump + lpdumpd land in the
+# ramdisk unable to start:  CANNOT LINK EXECUTABLE — liblpdump_interface-cpp.so.
+# Caught by reading the NEEDED list of every binary the flag installed against
+# what was actually in system/lib64, BEFORE flashing — `ls` says the tool is
+# there either way. lptools does NOT need it; lpdump does.
+TW_RECOVERY_ADDITIONAL_RELINK_LIBRARY_FILES += \
+    $(TARGET_OUT_SHARED_LIBRARIES)/liblpdump_interface-cpp.so
 TW_HAS_MTP := true
 # [!] TW_MTP_DEVICE deliberately NOT set. It would define USB_MTP_DEVICE, the
 # fallback path in mtp_MtpServer.cpp, and /dev/mtp_usb is the KERNEL f_mtp
